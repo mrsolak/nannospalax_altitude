@@ -1,4 +1,4 @@
-The R markdown script of Solak et al. 2024 research paper. All the custom functions were written by Jakub Kreisinger (see: https://www.researchgate.net/profile/Jakub-Kreisinger). 
+The R markdown script of Solak et al. 2024 research paper. All the custom functions in the script were written by Jakub Kreisinger (see: https://www.researchgate.net/profile/Jakub-Kreisinger). 
 
 
 The script contains the steps below:
