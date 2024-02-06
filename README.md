@@ -1,4 +1,4 @@
-The R markdown script of Solak et al. 2024. Altitude shapes gut microbiome composition accounting for diet and host genetics in a subterranean mole rat. JOURNAL. ISSUE. research paper.
+The R markdown script of Solak et al. 2024. Altitude shapes gut microbiome composition accounting for diet and host genetics in a subterranean mole rat. JOURNAL. ISSUE. DOI AND LINK TO THE PAPER.
 
 All the custom functions in the script were written by Jakub Kreisinger (see: https://www.researchgate.net/profile/Jakub-Kreisinger). 
 
