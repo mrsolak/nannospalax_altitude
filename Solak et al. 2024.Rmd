@@ -1,0 +1,1523 @@
+---
+title: "16s_workflow_final"
+author: "Halil Mert Solak"
+date: "2022-12-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen=999)
+```
+
+
+*Load necessary libraries*
+```{r setup, warning=F, message=F}
+library(BiocManager)
+library(devtools)
+library(dada2) #BiocManager::install("dada2")
+library(phyloseq)# BiocManager::install("phyloseq")
+library(ShortRead)
+library(ape)
+library(vegan)
+library(ggplot2)
+library(ggpubr)
+library(plyr)
+library(lme4)
+library(lmerTest)
+library(dplyr)
+library(Polychrome)
+library(metagMisc) # devtools::install_github("vmikk/metagMisc")
+library(DESeq2) # BiocManager::install("DESeq2")
+library(microbiomeSeq) #install_github("umerijaz/microbiomeSeq")
+library(forcats) #devtools::install_github("tidyverse/forcats")
+library(tidyverse)
+library(splines)
+library(MuMIn)
+library(ggeffects)
+library(MDMR)
+library(glmmTMB)
+library(adegenet)
+library(poppr)
+library(pegas)
+library(PopGenReport)
+library(hierfstat)
+library(factoextra)
+library(Demerelate) #works on R 4.0.5
+library(related) #install from tar.gz
+knitr::opts_chunk$set(root.dir = "D:/Rwd/16sFin/16sFin")
+
+```
+
+*1- Demultiplexing and Trimming with Skewer [use Bash Terminal]*
+```{r setup, warning=F, message=F}
+#[1]SKEWER - DEMULTIPLEXING
+#Define the fasta file that consists primers
+ADAPT_PATH=$(echo /home/hsolak/16s2/primers.fasta)
+#Define the matrix file that consists primer match matrix
+MATRIX_PATH=$(echo /home/hsolak/16s2/matrix.txt)
+
+#Go to RAW data directory
+cd /home/hsolak/16s2/raw_fastq
+#Define the samples 
+SAMPLES=$(ls -1| grep "R[12].fastq.gz"|sed -r 's/R[12].fastq.gz//'|sort| uniq)
+
+#Create directory for demultiplexed samples
+mkdir ../demultiplexed
+
+#Demultiplexing the data
+for i in $SAMPLES; do /home/hsolak/Desktop/skewer -x $ADAPT_PATH -M $MATRIX_PATH -b -m head -k 35 -d 0 -t 8 "$i"R1.fastq.gz "$i"R2.fastq.gz -o ../demultiplexed/"$i"; done >> ./log
+
+#Go to the demultiplexed folder
+cd ../demultiplexed/
+
+#Unzip the demultiplexed .gz files
+gzip *fastq
+
+
+#[2]SKEWER TRIMMING
+#make folder for demuplitpexed+trimmed data (those will be used in DADA)
+cd ..
+mkdir 02A.DEMULTI.16s
+
+#go to demutliplexed data from previous step which are input for trimming
+cd ./demultiplexed
+
+#list of unique demutiplexed files (they have "assigned" in the name - i.e. that is how skewer label the demultiplexed files generated in previous step)
+SAMPLES_16S=$(ls -1| grep "assigned-F_"|sed -r 's/-pair[12].fastq.gz//'|sort| uniq)
+
+#run trimming with skewer, the inline barcodes are denoted as Ns so anything can be there (but primer sequences alone should work as Skewer anyway trimms off everything to the 5' side from the hit)
+for i in $SAMPLES_16S; do /home/hsolak/Desktop/skewer -x NNNNCCTACGGGNGGCWGCAG -y NNGACTACHVGGGTATCTAATCC  -m head -k 35 -d 0 -t 8 "$i"-pair1.fastq.gz "$i"-pair2.fastq.gz -o ../02A.DEMULTI.16s/"$i"; done >> ../02A.DEMULTI.16s/log.trimmed.head
+
+cd ../02A.DEMULTI.16s
+gzip *fastq
+
+```
+
+*2- DADA2 Quality Filtering and Creating OTU Table*
+```{r setup, warning=F, message=F}
+rm(list = ls())
+
+library(dada2)
+library(ggplot2)
+setwd("/mediadisk/16S_DATA/16S2_DATA/16S2_DATA/02A.DEMULTI.16s/")
+
+LIST<-list.files()
+LIST
+F_reads<-LIST[grep("pair1.fastq.gz",LIST)]
+R_reads<-LIST[grep("pair2.fastq.gz",LIST)]
+
+sample.names<-gsub("_trus-trimmed-pair1.fastq.gz","",F_reads)
+sample.names<-gsub("-assigned-","",sample.names)
+tail(sample.names)
+
+tail(sample.names)
+#Names for filtered files
+filtFs <- paste0(sample.names, "_READ1_filt.fastq.gz")
+filtRs <- paste0(sample.names, "_READ2_filt.fastq.gz")
+tail(filtRs)
+
+#Q filtering
+for(x in 1:length(F_reads)) {
+  print(sample.names[x])
+  fastqPairedFilter(c(F_reads[x], R_reads[x]), c(filtFs[x], filtRs[x]),
+                    maxN=0, maxEE=2, minQ=2,truncQ=2,
+                    compress=TRUE, verbose=TRUE,
+                    minLen = c(260,200),truncLen = c(260,200))
+}
+
+
+
+# Create OTU seqtab
+fns <- list.files()
+fastqs <- fns[grepl(".fastq.gz$", fns)]
+fastqs <- sort(fastqs) 
+
+fnFs <- fastqs[grepl("_READ1_filt.fastq.gz", fastqs)] 
+fnRs <- fastqs[grepl("_READ2_filt.fastq.gz", fastqs)] 
+
+sample.names <- gsub("_READ1_filt.fastq.gz","",fnFs)
+
+#dereplicate sequences (get unique sequences from each file)
+derepFs <- derepFastq(fnFs,n = 1e+05, verbose=T)
+derepRs <- derepFastq(fnRs,n = 1e+05, verbose=T)
+
+names(derepFs) <- sample.names
+names(derepRs) <- sample.names
+
+#denoising
+dadaFs <- dada(derepFs, err=NULL, multithread = 6,selfConsist = TRUE,MAX_CONSIST=25) 
+dadaRs <- dada(derepRs, err=NULL, multithread = 6,selfConsist = TRUE,MAX_CONSIST=25)
+
+#merging
+mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE, minOverlap = 10,maxMismatch=1,justConcatenate=F)
+
+#final table
+seqtab <- makeSequenceTable(mergers)
+
+#save results
+save(seqtab,file="/home/hsolak/16s2/otutab_16s2.R")
+
+
+
+```
+
+*2Alternative- DADA2 Quality Filtering and Creating OTU Table using a linux cluster (TRUBA), use the script below [use Bash Terminal,not R]*
+```{r setup, warning=F, message=F}
+#!/bin/sh
+#SBATCH --partition=mid1
+#SBATCH --cpus-per-task=4
+#SBATCH --time=04:00:00
+#SBATCH --job-name=spalax-16s-dada
+#SBATCH --error=error-dada-spalax.txt
+#SBATCH --mail-user=halil.solak@fbe.karaelmas.edu.tr
+#SBATCH --mail-type=ALL
+
+#This is the script to anlyze the 16s data with dada2 R package
+#set the environment
+module load centos7.3/comp/gcc/9.2
+module load centos7.3/app/R/4.0.2-gcc
+
+#Run R script
+Rscript --vanilla /truba/scratch/hsolak/scripts/Rscripts/dada.R ##dada.R is the 2nd section (DADA2 Quality Filtering and Creating OTU Table) 
+
+#After you get the seqtab file, you can import seqtab in R and start analysis with phyloseq R package.
+```
+
+*3-Dada2 get REF.fasta [use Bash Terminal, not R]*
+```{r setup, warning=F, message=F}
+rm(list = ls())
+#load the seqtab
+load("D:/16S_DATA/16S2_DATA/16S2_DATA/otutab_16s2.R")
+
+FASTA<-DNAStringSet(colnames(seqtab))
+names(FASTA)<-colnames(seqtab)
+writeFasta(FASTA,"D:/Rwd/16sFin/16sFin/REF.fasta") #Use this on chimera removing
+
+```
+
+*4-Filter the chimeras with Usearch [use Bash Terminal, not R]*
+```{r setup, warning=F, message=F}
+#Download the gold database https://drive5.com/uchime/uchime_download.html
+
+#New usearch11 doesn't support -nonchimeras, use old one v8.0.1623.
+
+./usearch8.0.1623_i86linux32 -uchime_ref REF.fasta -db gold.fa -nonchimeras haplo.uchime.fasta -strand plus #haplo.uchime.fasta is output.
+
+```
+
+*5- DADA2 Assign Taxonomy [might take long time in PC, better to  use on linux server]*
+```{r setup, warning=F, message=F}
+library(Biostrings)
+
+rm(list = ls()) #clear the environment
+
+#load the seqtab
+load("D:/16S_DATA/16S2_DATA/16S2_DATA/otutab_16s2.R")
+
+fasta<-readDNAStringSet("D:/Rwd/16sFin/chimera/haplo.uchime.fasta")
+taxa <- assignTaxonomy(as.character(fasta), "D:/Rwd/16sFin/chimera/silva_nr99_v138.1_train_set.fa.gz",multithread=8,minBoot = 80) #download here:https://zenodo.org/record/4587955
+
+save(taxa, file="/home/hsolak/16s2/chimera_taxonomy_assign/taxa.R")
+```
+
+*6- Create phyloseq object*
+```{r setup, warning=F, message=F}
+rm(list = ls())
+library(phyloseq)
+library(ShortRead)
+
+load("D:/16S_DATA/16S2_DATA/16S2_DATA/otutab_16s2.R") 
+ 
+dim(seqtab)
+sum(seqtab)
+
+seqtab<-otu_table(seqtab,taxa_are_rows = F) # Build OTU Table
+
+HAPLO<-readDNAStringSet("D:/Rwd/16sFin/chimera/haplo.uchime.fasta") #reference sequences
+
+load("D:/Rwd/16sFin/chimera/taxa.R") #Taxonomy table
+TAXO<-tax_table(taxa) 
+ 
+dim(TAXO)
+
+PS2<-merge_phyloseq(seqtab,TAXO,HAPLO) #merge otu table, taxo and haplo
+ 
+PS2<-prune_taxa(as.logical(is.na(tax_table(PS2)[,"Phylum"])==F),PS2) # exclude NA 
+
+PS2<-prune_taxa(as.logical(tax_table(PS2)[,"Order"]!="Chloroplast"),PS2) # exclude chloroplast order
+
+PS2
+
+
+## Add metadata
+MET<-read.delim("D:/Rwd/16sFin/16sFin/metadata2222.csv",
+                header = T,
+                stringsAsFactors = F, sep=","
+              )
+dim(MET)
+head(MET)
+
+SN<-paste(MET$adaptorN,MET$adaptorS,"_F_",MET$primerF,"R",sep="") #combine F and R Primers and inline barcodes, these are sample ID
+
+
+SSUM<-sample_sums(PHYLOSEQ2) #Returns the total number of individuals observed from each sample
+SNAMES<-sample_names(PHYLOSEQ2) #Get sample names
+
+NOT_IN_META<-data.frame(SSUM,SNAMES) #Combined data frame of sample names and total number of reads
+NOT_IN_META<-NOT_IN_META[!sample_names(PHYLOSEQ2)%in%SN,] #Exclude ????
+write.table(NOT_IN_META,"D:/Rwd/16sFin/16sFin/NOT_IN_META.txt",row.names = F,quote = F, sep="\t")
+
+MET<-sample_data(MET) # Create sample data
+sample_names(MET)<-SN # Write sample names from SN
+
+
+sample_names(MET)%in%sample_names(PHYLOSEQ2)
+
+PHYLOSEQ2= merge_phyloseq(PHYLOSEQ2,MET) 
+NOT_IN_PHYLOSEQ<-MET[!sample_names(MET)%in%sample_names(PHYLOSEQ2),] #A07_caecum_tip_B does not have duplicate so excluded in phyloseq
+
+#Add sample data on phyloseq objective
+
+SUMMARY<-summary(as.factor(sample_data(PHYLOSEQ2)$sample_ID), maxsum = 10000)
+rev(sort(SUMMARY)) #A07 just have 1 copy
+SUMMARY.n<-names(SUMMARY)[SUMMARY==2] 
+PHYLOSEQ<-prune_samples(sample_data(PHYLOSEQ)$sample_ID%in%SUMMARY.n==T, PHYLOSEQ) # Take only the samples with duplicates
+
+PHYLOSEQ2
+
+save(PHYLOSEQ2,file = "D:/Rwd/phyloseq_fin/ps2_fin.R") # Save the phyloseq objective with only duplicates
+
+# Now you have Phyloseq file. You can proceed to analyse the 16S rRNA database.
+```
+
+*7- Number of sequences per sample *
+```{r warning=F, message=F}
+rm(list = ls())
+library (phyloseq)
+
+load("D:/Rwd/phyloseq_fin/ps2_fin.R")
+
+SSUMS2<-sample_sums(PHYLOSEQ2) #Returns the total number of individuals observed from each sample
+
+DF2<-data.frame(SSUMS2,sample_data(PHYLOSEQ2)) #Create data frame with sample names
+
+DF2<-DF2[order(DF2$SSUMS),] #Order by sample sums, lowest 2k and highest 56k
+
+
+write.table(DF2,"D:/Rwd/16sFin/16sFin/SSUMS_SUMMARY2.txt",row.names = F,quote = F, sep="\t")
+```
+
+*8- Compare Duplicates *
+```{r setup, warning=F, message=F}
+rm(list = ls())
+
+library(vegan)
+load("D:/Rwd/phyloseq_fin/ps2_fin.R")
+
+
+SUMMARY<-summary(as.factor(sample_data(PHYLOSEQ2)$sample_ID), maxsum = 10000)
+rev(sort(SUMMARY)) 
+
+SUMMARY.n<-names(SUMMARY)[SUMMARY==2] # Take only the samples with duplicates
+
+PHYLOSEQ2.dupl<-prune_samples(sample_data(PHYLOSEQ2)$sample_ID%in%SUMMARY.n==T, PHYLOSEQ2) # Take only the samples with duplicates
+
+save(PHYLOSEQ2.dupl,file = "D:/Rwd/16sFin/16sFin/PHYLOSEQ2.dupl.R") # Save the phyloseq objective with only duplicates
+
+#Compare duplicates
+dupl.1<-prune_samples(duplicated(sample_data(PHYLOSEQ2)$sample_ID)==F,PHYLOSEQ2) #47 samples
+dupl.2<-prune_samples(duplicated(sample_data(PHYLOSEQ2)$sample_ID)==T,PHYLOSEQ2) #47 samples
+
+
+BC1<-as.matrix(vegdist(otu_table(transform_sample_counts(dupl.1,function(x) x/sum(x))))) #Create bray-curtis distance matrix with OTU counts per each sample for first duplicate
+BC2<-as.matrix(vegdist(otu_table(transform_sample_counts(dupl.2,function(x) x/sum(x))))) #Create bray-curtis distance matrix with OTU counts per each sample for second duplicate
+
+dupl.1.DF<-data.frame(sample_data(dupl.1)) #create data frame for duplicate 1
+dupl.2.DF<-data.frame(sample_data(dupl.2)) #create data frame for duplicate 2
+dupl.1.DF$SSUMS<-sample_sums(dupl.1) #Add sample sums column in data frame
+dupl.2.DF$SSUMS<-sample_sums(dupl.2) #Add sample sums column in data frame
+
+rownames(dupl.1.DF)<-dupl.1.DF$sample_ID
+rownames(dupl.2.DF)<-dupl.2.DF$sample_ID
+dupl.2.DF<-dupl.2.DF[match(rownames(dupl.1.DF),rownames(dupl.2.DF) ),]
+
+rownames(BC1)<-colnames(BC1)<-sample_data(dupl.1)$sample_ID #Use the sample_id instead or barcode ID
+rownames(BC2)<-colnames(BC2)<-sample_data(dupl.2)$sample_ID #Use the sample_id instead or barcode ID
+
+BC2<-BC2[rownames(BC1),rownames(BC1)]
+
+
+BC1.pcoa<-cmdscale(as.dist(BC1)) #Create PCoA matrix
+BC2.pcoa<-cmdscale(as.dist(BC2)) #Create PCoA matrix
+
+PROTEST<-protest(BC1.pcoa,BC2.pcoa) #Test for duplicates
+
+DF.prot<-data.frame(PROTEST$Y,PROTEST$X,sample_data(dupl.1),
+                    resid=resid(PROTEST))
+
+names(DF.prot)[1:4]<-c("X1","X2","Y1","Y2")
+
+#Correlation between duplicates - arrow shows distance between duplicates
+ggplot(DF.prot,aes(x=X1,y=X2))+geom_point()+geom_segment(aes(x=X1,y=X2,xend = Y1, yend = Y2),arrow = arrow(length = unit(0.1,"cm"))) + ggtitle("Correlation between duplicates in second batch of samples (arrow length indicates the difference)")
+
+PROTEST
+
+```
+
+*9- Merge Duplicates *
+```{r setup, warning=F, message=F}
+rm(list = ls())
+
+#before run this part make sure that there is no sample with only one duplicate, exclude the ones with no duplicate.
+
+load("D:/Rwd/phyloseq_fin/ps2_fin.R")
+
+# Custom functions by Jakub Kreisinger
+
+## exclude nonduplicated samples
+dupl.concensus<-function(PHYLOSEQ,NAMES){
+  
+  # exclude nonduplicated samples
+  IDS<-as.character(data.frame(sample_data(PHYLOSEQ))[,NAMES])
+  IDS.dupl<-IDS[duplicated(IDS)]
+  
+  PHYLOSEQ<-prune_samples(IDS%in%IDS.dupl, PHYLOSEQ)
+  if(length(IDS.dupl)*2<length(IDS)) {NONUPLICATED<-prune_samples(!IDS%in%IDS.dupl, PHYLOSEQ)
+                                       print(paste("Following names are nonduplicated",sample_names(NONUPLICATED)))}
+  
+  CATS<-as.character(data.frame(sample_data(PHYLOSEQ))[,NAMES])
+  CATS2<-levels(factor(CATS))
+  OTU_TAB<-otu_table(PHYLOSEQ)
+  rownames(OTU_TAB)<-CATS
+  
+  # i<-5
+  for (i in 1:length(CATS2))
+  {
+    # print(CATS2[i])
+    FILTER.act<-colSums(OTU_TAB[rownames(OTU_TAB)==CATS2[i],]>0)>1
+    OTU_TAB[rownames(OTU_TAB)==CATS2[i],]
+    OTU_TAB[rownames(OTU_TAB)==CATS2[i],]<-t(apply(OTU_TAB[rownames(OTU_TAB)==CATS2[i],],1,function(x) x*FILTER.act))
+  }
+  
+  rownames(OTU_TAB)<-sample_names(PHYLOSEQ)
+  otu_table(PHYLOSEQ)<-OTU_TAB
+  PHYLOSEQ.clean<-prune_taxa(taxa_sums(PHYLOSEQ)>0,PHYLOSEQ)
+  
+  PHYLOSEQ.clean
+}
+
+
+
+merge.duplicates<-function(PHYLOSEQ,NAMES){
+  CATS<-as.character(data.frame(sample_data(PHYLOSEQ))[,NAMES])
+  sample_data(PHYLOSEQ)$duplic.id<-CATS
+  SAMDAT<-sample_data(PHYLOSEQ)
+  SAMDAT.sub<-SAMDAT[duplicated(CATS)==F,]
+  FASTA<-refseq(PHYLOSEQ)
+  rownames(SAMDAT.sub)<-SAMDAT.sub$duplic.id
+  PHYLOSEQ.merge<-merge_samples(PHYLOSEQ,"duplic.id")
+  sample_data(PHYLOSEQ.merge)<-SAMDAT.sub
+  PHYLOSEQ.merge<-merge_phyloseq(PHYLOSEQ.merge,FASTA)
+  PHYLOSEQ.merge
+}
+
+
+NAMES=sample_data(PHYLOSEQ2)$sample_ID #get sample ID of first dataset
+
+
+CONSIST<-dupl.concensus(PHYLOSEQ=PHYLOSEQ2,NAMES="sample_ID") # take the technical duplicates for each sample and remove any ASVs that are not present in both of them.
+CONSIST.merged<-merge.duplicates(PHYLOSEQ=CONSIST,NAMES="sample_ID") # Merge duplicates and save it.
+
+PHYLOSEQ # 58 samples with 20435 taxa
+sum(otu_table(PHYLOSEQ)) # 671953
+
+CONSIST.merged # 29 samples with 2703 taxa
+sum(otu_table(CONSIST.merged)) # 581591
+
+PHYLOSEQ2=CONSIST.merged
+save(PHYLOSEQ2,file = "D:/Rwd/phyloseq_fin/ps2_fin.R") 
+
+```
+
+*9A - re-assign taxonomy [not mandatory read the text below]*
+```{r setup, warning=F, message=F}
+rm(list = ls())
+
+#I combined two datasets with different version of Silva reference, so I had to re-assign the taxonomy.
+#You can skip this part if this is not the case for you!
+
+library(phyloseq)
+
+rm(list = ls())
+
+load("D:/Rwd/PS2_fin/PS2.R")
+
+#1. First, you should check if there are any duplicated haplotypes in your PS2  
+
+sum(duplicated(as.character(refseq(PS2)))) # there is none
+
+# 2. to reassign taxonomy, you should proceed as follow:
+              
+SEQS<-as.character(refseq(PS2_cor))
+names(SEQS)<-NULL
+TAX<-dada2::assignTaxonomy(seqs=SEQS, refFasta="D:/Rwd/16sFin/chimera/silva_nr99_v138.1_train_set.fa.gz")
+TAX<-tax_table(TAX)
+tax_table(PS2_cor)<-TAX
+
+save(PS2_cor,file = "D:/Rwd/phyloseq_fin/PS2_cor.R")
+```
+
+*9B - Number of sequences per sample for the final database*
+```{r warning=F, message=F}
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+
+SSUMS<-sample_sums(PS2_cor) #Returns the total number of individuals observed from each sample
+
+DF<-data.frame(SSUMS,sample_data(PS2_cor)) #Create data frame with sample names
+DF<-DF[order(DF$SSUMS),] #Order by sample sums, lowest 2k and highest 56k
+
+write.table(DF,"D:/Rwd/16sFin/16sFin/tables/2SSUMS_SUMMARY.txt",row.names = F,quote = F, sep="\t")
+
+```
+
+*9C - DATEST RELATIVE ABUNDANCE*
+```{r warning=F, message=F}
+# http://benjjneb.github.io/dada2/tutorial.html
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+
+#exclude "out" samples from dataset
+'%!in%' <- function(x,y)!('%in%'(x,y))
+PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #exclude out samples
+
+library(DAtest)
+library(phylosmith)
+
+total = median(sample_sums(PS2_cor))
+standf = function(x, t=total) round(t * (x / sum(x)))
+
+PS_phy <- conglomerate_taxa(PS2_cor, "Phylum")
+PS_phy = transform_sample_counts(PS_phy, standf)
+
+res <- DA.kru(data = PS_phy, predictor = "altitude", relative = TRUE, p.adj = "fdr")
+write.table(res, file="D:/Rwd/16sFin/16sFin/tables/cor/comp_kru.csv")
+
+#Family
+PS_fam <- conglomerate_taxa(PS2_cor, "Family")
+PS_fam = transform_sample_counts(PS_fam, standf)
+
+res <- DA.kru(data = PS_fam, predictor = "altitude", relative = TRUE, p.adj = "fdr")
+write.table(res, file="D:/Rwd/16sFin/16sFin/tables/cor/comp_kru_fam.csv")
+
+```
+
+*10 - Barplots*
+
+```{r warning=F, message=F}
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+'%!in%' <- function(x,y)!('%in%'(x,y)) #custom function to exclude some samples
+PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #I had to exclude some samples from dataset
+
+
+# https://vaulot.github.io/tutorials/Phyloseq_tutorial.html # You can follow the manual here
+# https://stackoverflow.com/questions/40199274/how-to-force-specific-order-of-the-variables-on-the-x-axis
+
+##Normalize number of reads in each sample using median sequencing depth.
+total = median(sample_sums(PS2_cor))
+standf = function(x, t=total) round(t * (x / sum(x)))
+PS2_cor = transform_sample_counts(PS2_cor, standf)
+
+rank_names(PS2_cor) # Check the taxonomic ranks
+
+# 1- Phylum by individuals 
+
+######Bar Plot -- ID by Phylum
+p=plot_bar(PS2_cor, fill = "Phylum")+ geom_bar(stat="identity", position="stack") 
+
+p + aes(x = fct_reorder(Sample, p$data$alt2)) #order the barplots acccording to the altitude category.
+
+p #view plot
+
+# 2- Phylum by altitude 
+
+PS_alt <- merge_samples(PS2_cor, "altitude")
+PS_alt = transform_sample_counts(PS_alt, standf)
+
+library(Polychrome) #assign custom colors
+
+#This palette is relatively fine, if you have < 25 colors:
+c25 <- c("gray70","green4", # red
+         "#E31A1C",
+         "#6A3D9A", # purple
+         "#FF7F00", # orange
+         "black","dodgerblue2",
+         "skyblue2","#FB9A99", # lt pink
+         "palegreen2",
+         "#CAB2D6", # lt purple
+         "#FDBF6F", # lt orange
+         "gold1", "khaki2",
+         "maroon","orchid1","deeppink1","blue1","steelblue4",
+         "darkturquoise","green1","yellow4","yellow3",
+         "darkorange4","brown")
+
+p=plot_bar(PS_alt, fill = "Phylum") + geom_bar(stat="identity", position="stack") +scale_fill_manual(values=c25)
+
+# Change order of X axis by altitude group
+p=p + aes(x = fct_reorder(Sample, p$data$alt2))
+
+
+# 3- Phylum by population (or sampling localities) 
+PHYLOSEQ_population <- merge_samples(PS2_cor, "pop")
+PHYLOSEQ_population = transform_sample_counts(PHYLOSEQ_population, standf)
+
+p1=plot_bar(PHYLOSEQ_population, fill = "Phylum") + geom_bar(stat="identity", position="stack") +scale_fill_manual(values=c25)
+
+# Change order of X axis by altitude group
+library(forcats)
+p1=p1 + aes(x = fct_reorder(Sample, p1$data$alt2))
+
+#combine plots
+library(ggpubr)
+ggarrange(p, p1, ncol=2, nrow=1, common.legend = TRUE, legend="bottom")
+
+
+# 4- Phylum by sex 
+PHYLOSEQ_sex <- merge_samples(PS2_cor, "sex")
+PHYLOSEQ_sex = transform_sample_counts(PHYLOSEQ_sex, standf)
+
+p=plot_bar(PHYLOSEQ_sex, fill = "Phylum") + 
+  geom_bar(aes(color=Phylum, fill=Phylum), stat="identity", position="stack") + ggtitle("Relative Abundance of Dominant Bacterial Phyla by Sex")
+
+# 5- Family by altitude 
+
+PS_alt <- merge_samples(PS2_cor, "altitude")
+PS_alt = transform_sample_counts(PS_alt, standf)
+
+p=plot_bar(PS_alt, fill = "Family") + 
+  geom_bar(aes(color=Family, fill=Family), stat="identity", position="stack") + ggtitle("Relative Abundance of Dominant Bacterial Phyla by Altitude")
+
+# Change order of X axis by altitude group
+p + aes(x = fct_reorder(Sample, p$data$alt2))
+
+# 6- Genus by altitude 
+
+PS_alt <- merge_samples(PS2_cor, "altitude")
+PS_alt = transform_sample_counts(PS_alt, standf)
+
+p=plot_bar(PS_alt, fill = "Genus") + 
+  geom_bar(aes(color=Genus, fill=Genus), stat="identity", position="stack") + ggtitle("Relative Abundance of Dominant Bacterial Genera by Altitude")+ aes(x = fct_reorder(Sample, p$data$alt2))
+
+# Change order of X axis by altitude group
+p + aes(x = fct_reorder(Sample, p$data$alt2))
+
+
+# 7 - The most abundant bacterial phyla
+#https://github.com/joey711/phyloseq/issues/494
+
+sample_data(PS2_cor)$group=as.factor(c("AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA","AA"))
+
+PHYLOSEQ_all <- merge_samples(PS2_cor, "group")
+
+
+phy <- transform_sample_counts(PS2_cor, function(x) x/sum(x)) # get abundance in %
+glom <- tax_glom(phy, taxrank = 'Phylum') # agglomerate taxa
+dat <- psmelt(glom) # create dataframe from phyloseq object
+dat$Phylum <- as.character(dat$Phylum) # convert Phylum to a character vector from a factor because R
+medians <- ddply(dat, ~Phylum, function(x) c(median=median(x$Abundance))) # group dataframe by Phylum, calculate median rel. abundance
+remainder <- medians[medians$median <= 0.01,]$Phylum # find Phyla whose rel. abund. is less than 1%
+dat[dat$Phylum %in% remainder,]$Phylum <- 'Remainder' # change their name to "Remainder"
+
+p=ggplot(dat,
+       aes(x=reorder(Phylum, Abundance),
+           y=Abundance)) + geom_boxplot() + coord_flip() + ggtitle ("The most abundant bacterial phyla")
+p
+
+
+# 8 - The most abundant bacterial families
+phy <- transform_sample_counts(PS2_cor, function(x) x/sum(x)) # get abundance in %
+glom <- tax_glom(phy, taxrank = 'Family') # agglomerate taxa
+dat <- psmelt(glom) # create dataframe from phyloseq object
+dat$Family <- as.character(dat$Family) # convert Phylum to a character vector from a factor because R
+medians <- ddply(dat, ~Family, function(x) c(median=median(x$Abundance))) # group dataframe by Phylum, calculate median rel. abundance
+remainder <- medians[medians$median <= 0.01,]$Family # find Phyla whose rel. abund. is less than 1%
+dat[dat$Family %in% remainder,]$Family <- 'Remainder' # change their name to "Remainder"
+
+p= ggplot(dat,
+       aes(x=reorder(Family, Abundance),
+           y=Abundance)) + geom_boxplot() + coord_flip() + ggtitle ("The most abundant bacterial family")
+
+
+# 9 - The most abundant bacterial genera
+phy <- transform_sample_counts(PS2_cor, function(x) x/sum(x)) # get abundance in %
+glom <- tax_glom(phy, taxrank = 'Genus') # agglomerate taxa
+dat <- psmelt(glom) # create dataframe from phyloseq object
+dat$Genus <- as.character(dat$Genus) # convert Genus to a character vector from a factor because R
+medians <- ddply(dat, ~Genus, function(x) c(median=median(x$Abundance))) # group dataframe by Genus, calculate median rel. abundance
+remainder <- medians[medians$median <= 0.01,]$Genus # find Genus whose rel. abund. is less than 1%
+dat[dat$Genus %in% remainder,]$Genus <- 'Remainder' # change their name to "Remainder"
+
+p=ggplot(dat,
+       aes(x=reorder(Genus, Abundance),
+           y=Abundance)) + geom_boxplot() + coord_flip() + ggtitle ("The most abundant bacterial genera")
+
+```
+
+*11 - ALPHA and BETA DIVERSITY*
+```{r warning=F, message=F}
+# Tutorial here: http://benjjneb.github.io/dada2/tutorial.html 
+## import Phylogenetic tree # https://joey711.github.io/phyloseq/import-data.html
+
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+'%!in%' <- function(x,y)!('%in%'(x,y))
+PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #exclude out samples
+
+# 1- Alpha Diversity
+
+# Tutorial here: https://scienceparkstudygroup.github.io/microbiome-lesson/04-alpha-diversity/index.html
+
+data_shannon <- diversity(otu_table(PS2_cor), index = "shannon")   # calculate Shannon index using vegan package
+data_richness <- estimateR(otu_table(PS2_cor))  # calculate richness and Chao1 using vegan package
+data_evenness <- diversity(otu_table(PS2_cor)) / log(specnumber(otu_table(PS2_cor))) # calculate evenness index using vegan package
+data_alphadiv <- cbind(sample_data(PS2_cor), t(data_richness), data_shannon, data_evenness)
+simpson=estimate_richness(PS2_cor, measures="simpson")
+inverse_simpson=estimate_richness(PS2_cor, measures="InvSimpson")
+
+#alpha diversity indexes table
+alpha_tidy=data_alphadiv[,c("sample_ID","pop", "altitude" ,"alt2","sex","S.obs", "data_evenness", "S.chao1","se.chao1" ,"data_shannon"), drop=FALSE]
+alpha_tidy$Simpson=as.numeric(simpson[,1])
+alpha_tidy$InvSimpson=as.numeric(inverse_simpson[,1])
+
+#Save Table
+write.csv(alpha_tidy,"D:/Rwd/16sFin/16sFin/plots/cor/alpha_tidy.csv",row.names = F,quote = F)
+
+#alpha diversity plots
+##ALSO CHECK THIS OUT https://rpubs.com/lconteville/713954
+p=plot_richness(PS2_cor, x="altitude", measures=c("Observed", "Simpson", "Shannon"))+geom_boxplot(alpha=0.6)+ theme_classic()
+
+#order x axis by altitude
+p=p+aes(x = fct_reorder(altitude, p$data$alt2))
+
+comp=list(c("low","middle"),c("middle","high"),c("low","high"))
+symnum.args=list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
+
+p+stat_compare_means(method = "wilcox.test", comparisons = comp, label = "p.signif", symnum.args = symnum.args)
+
+
+# 2- Alpha Diversity by sampling localities
+
+p=plot_richness(PS2_cor, x="pop", measures=c("Observed", "Simpson", "Shannon"), color="altitude")+geom_boxplot(alpha=0.6) 
+
+p$data$pop<- as.character(p$data$pop)
+p$data$pop<-factor(x = p$data$pop, levels = unique(p$data$pop[order(as.character(p$data$alt2))]))
+
+comp=list(c("eregli","ulukisla"),c("darbogaz","madenkoy"),c("kiziltepe","karagol"))
+symnum.args=list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
+
+p+stat_compare_means(method = "wilcox.test", comparisons = comp, label = "p.signif", symnum.args = symnum.args)
+
+#p+stat_compare_means(method = "wilcox.test", comparisons = comp) #to see exact p-values
+
+
+# 3- Beta Diversity 
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+
+random_tree = rtree(ntaxa(PS2_cor), rooted=TRUE, tip.label=taxa_names(PS2_cor)) #add a phylogenetic tree to phyloseq
+PS2_cor = merge_phyloseq(PS2_cor, random_tree) #merge the tree and phyloseq
+
+
+##Beta Diversity: Plot the PCoA using the weighted UniFrac as distance (takes account phylogeny):
+wunifrac_dist = phyloseq::distance(PS2_cor, method="unifrac", weighted=T)
+ordination = ordinate(PS2_cor, method="PCoA", distance=wunifrac_dist)
+p=plot_ordination(PS2_cor, ordination, color="altitude") + theme(aspect.ratio=1)+ ggtitle("Beta Diversity. PCoA using the Weighted Unifrac distance")+ scale_y_reverse() + geom_point(size=2)
+
+
+##Beta Diversity: Plot the PCoA using Bray-Curtis distance:
+bray_dist= phyloseq::distance(PS2_cor, method="bray", weighted=F)
+ordination = ordinate(PS2_cor, method="PCoA", distance="bray")
+p=plot_ordination(PS2_cor, ordination, color="altitude", shape = "pop") + theme(aspect.ratio=1)+ ggtitle("Beta Diversity. PCoA using the Bray-Curtis distance") + geom_point(size=2)
+
+plot_ordination(PS2_cor, ordination, color="altitude", shape = "pop") + theme(aspect.ratio=1, legend.text = element_text(size = 12)) +geom_point(size=3) + scale_x_reverse() + scale_y_reverse() +  scale_shape_manual(values=c(0,4,21,3,15,17))
+
+
+## PERMANOVA##
+adonis2(wunifrac_dist ~ sample_data(PS2_cor)$altitude) #significant
+adonis2(bray_dist ~ sample_data(PS2_cor)$altitude)     ##significant
+
+
+##________________________ Inter-individual divergence / spread ________##
+#https://microbiome.github.io/tutorials/Betadiversity.html
+library(MicrobeDS) #remotes::install_github("twbattaglia/MicrobeDS")
+library(microbiome) #BiocManager::install("microbiome")
+library(dplyr)
+library(vegan)
+library(reshape)
+
+pseq=PS2_cor
+
+b.low <- divergence(subset_samples(pseq, altitude == "low"),
+   apply(abundances(subset_samples(pseq, altitude == "low")), 1, median))
+
+b.middle <- divergence(subset_samples(pseq,altitude == "middle"),
+   apply(abundances(subset_samples(pseq, altitude == "middle")), 1, median))
+
+
+b.high <- divergence(subset_samples(pseq,altitude == "high"),
+   apply(abundances(subset_samples(pseq, altitude == "high")), 1, median))
+
+
+l<- list(b.low, b.middle, b.high)
+df<- melt(l)
+df$L1[df$L1 == '1']<- 'low'
+df$L1[df$L1 == '2']<- 'middle'
+df$L1[df$L1 == '3']<- 'high'
+
+df$L1<- factor(df$L1, levels = c("low","middle","high"))
+
+p<- ggplot(df, aes(x = L1, y = value)) + geom_boxplot()+ xlab('') + ggtitle("Inter-individual divergence") 
+p+ ylab("Bray-Curtis Distance Value")
+
+df=write.csv(df, file = "D:/Rwd/16sFin/16sFin/tables/cor/inter-individual divergence.csv")
+```
+
+*12 - MIXED MODELLING*
+```{r warning=F, message=F}
+
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+#exclude "out" samples from dataset
+'%!in%' <- function(x,y)!('%in%'(x,y))
+PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #exclude out samples
+
+# Define the exact altitude for each sample as a numeric variable
+ALT.mat<-data.frame(pop=c("eregli","ulukisla","madenkoy","darbogaz","karagol","kiziltepe"),
+                    alt.cont=c(1050,1250,1800,2000,2600,2900))
+
+LOC<-sample_data(PS2_cor)$pop
+Alt_cont<-as.numeric()
+
+for(i in 1:length(LOC)){
+  Alt_cont[i]<-ALT.mat[ALT.mat$pop==LOC[i],2]
+}
+sample_data(PS2_cor)$Alt_cont<-Alt_cont
+
+############################################
+
+PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor) #Resample an OTU table such that all samples have the same library size
+
+# 1- Alpha Diversity modelling
+
+RICH<-estimate_richness(PHYLOSEQ2.rare)
+RICH<-data.frame(RICH,sample_data(PHYLOSEQ2.rare))
+
+write.csv(RICH,"D:/Rwd/16sFin/16sFin/plots/cor/RICH.csv",row.names = F,quote = F)
+
+#1. fitting models
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Shannon~altitude+(1|pop),data=RICH) #significant middle
+
+#2. model comparission
+AIC(model_null,model_cat,model_cat2,model_cat3) #
+anova(model_null,model_cat) #the altitude category doesn't explain the data better compared to null model.
+#But p=0.095 not so far from being significant
+
+
+#3. proportion of variance explanined
+#for [1] fixed effects only (marginal R2, R2m), fixed + random effects (conditional R2c), 
+r.squaredGLMM(model_cat) #23 percent of fixed effects and 35 percent random conditional effect
+
+summary(model_cat)
+#middle altitude is significantly different between low and high altitude
+#however there is no significant effect of altitude in alpha diversity.
+
+# 3- Beta Diversity GLMMs
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor)
+
+#Scores for first (two?) PCOA axes could be use a model response 
+
+PHYLOSEQ2.trans<-transform_sample_counts(PHYLOSEQ2.rare,function(x) x/sum(x))
+DIST<-vegdist(otu_table(PHYLOSEQ2.trans))
+ORD<-ordinate(PHYLOSEQ2.trans,method="PCoA",distance = DIST)
+plot_ordination(PHYLOSEQ2.trans,ORD,color="pop")
+
+ORD_df<-plot_ordination(PHYLOSEQ2.trans,ORD,justDF = T)
+
+#Use the PCoA axes as beta diversity model
+model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.2~altitude+(1|pop),data=ORD_df)
+
+summary(model_cat)
+anova(model_null,model_cat) #cat model explains better than null p=0.01
+
+r.squaredGLMM(model_cat) #~80 percent of the variation explained by the model
+
+qqnorm(resid(model_cat))
+qqline(resid(model_cat)) 
+
+#Second axes of PCoA definitely represents the altitude. Plus, model is also significant.
+
+
+# 3- Beta Diversity MDMR
+#MDMR calculates mixed models for distance data
+#should be definetly used - models with PCoA capture only relatively low fraction of variation in the microbiota (11 and 10% for the first and the second axes, respectively)
+#but information you can see in the MDMR output are limited
+#you probably conduct separate analyses to compare high ~ middle, low ~ middle etc samples. 
+
+#altitude mdmr
+mdmr.res <- MDMR::mixed.mdmr(~altitude+
+                               (1|pop),
+                             data =ORD_df,D = DIST)
+summary(mdmr.res)
+
+#mdmr is also showing strong effect of altitude on microbiome composition.
+
+
+# 4- Differential abundance (ASVs-level) analyses
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+
+#######################################
+#ASV-level analyzes - custom r script## 
+#######################################
+
+sample_data(PS2_cor)$seq_sums<-sample_sums(PS2_cor)
+INCIDENCE<-taxa_sums(transform_sample_counts(PS2_cor,function(x) ifelse(x>0,1,0)))
+FILTER<-INCIDENCE>10 #ASV that were present in > 10 samples (it makes no sense to run these analyzes for low-abundance ASVs)
+sum(FILTER)
+
+PS2.sub<-prune_taxa(FILTER,PS2_cor) #subset of high abundance ASVs
+
+SD.sub<-sample_data(PS2.sub)
+class(SD.sub)<-"data.frame"
+OTU_tab.sub<-otu_table(PS2.sub)
+class(OTU_tab.sub)<-"matrix"
+dim(OTU_tab.sub)
+
+i<-1
+ANOVA.kont<-matrix(ncol = 8,nrow = dim(OTU_tab.sub)[2]) #matrice for results
+ANOVA.kat<-matrix(ncol = 8,nrow = dim(OTU_tab.sub)[2])
+ANOVA.poly<-matrix(ncol = 8,nrow = dim(OTU_tab.sub)[2])
+
+#fits models for each ASV
+for(i in 1:dim(OTU_tab.sub)[2]){
+  print(i)
+  SD.sub$ACT<-OTU_tab.sub[,i]
+  m.null<-glmmTMB(ACT~1+(1|pop), offset = log(seq_sums), family = nbinom2,data = SD.sub) # null model ~ no predictor
+  m.kont<-glmmTMB(ACT~Alt_cont+(1|pop), offset = log(seq_sums), family = nbinom2,data = SD.sub) # altitude as a continuous predictor
+  m.poly<-glmmTMB(ACT~poly(Alt_cont,2)+(1|pop), offset = log(seq_sums), family = nbinom2,data = SD.sub) # polynomial effect
+  m.kat<-glmmTMB(ACT~altitude+(1|pop), offset = log(seq_sums), family = nbinom2,data = SD.sub) # altitude as a categorial predictor
+  
+  ANOVA.kont[i,]<-as.numeric(anova(m.kont,m.null)[2,]) #model comparissions
+  ANOVA.kat[i,]<-as.numeric(anova(m.kat,m.null)[2,])
+  ANOVA.poly[i,]<-as.numeric(anova(m.kont,m.poly)[2,])
+
+}
+
+NAMES<-c("Df","AIC","BIC","logLik", "deviance", "Chisq", "Df","p")
+colnames(ANOVA.kont)<-colnames(ANOVA.kat)<-colnames(ANOVA.poly)<-NAMES
+
+ANOVA.kont<-data.frame(ANOVA.kont)
+ANOVA.poly<-data.frame(ANOVA.poly)
+ANOVA.kat<-data.frame(ANOVA.kat)
+
+#multiple testing corrections, fdr
+ANOVA.kont$fdr<-p.adjust(ANOVA.kont$p,"fdr")
+ANOVA.poly$fdr<-p.adjust(ANOVA.poly$p,"fdr")
+ANOVA.kat$fdr<-p.adjust(ANOVA.kat$p,"fdr")
+
+#taxonomy from the original phyloseq
+ANOVA.kont<-data.frame(ANOVA.kont,tax_table(PS2.sub))
+ANOVA.kat<-data.frame(ANOVA.kat,tax_table(PS2.sub))
+ANOVA.poly<-data.frame(ANOVA.poly,tax_table(PS2.sub))
+
+#extracts significant ASVs
+ANOVA.kat.sig<-ANOVA.kat[ANOVA.kat$fdr<0.05&!is.na(ANOVA.kat$fdr),]
+SIG_ASVs<-rownames(ANOVA.kat.sig)
+length(SIG_ASVs)
+
+#data frame for plot
+phyloseq_2_GG<-function(which.taxa,which.phyloseq,manage.ussigned=FALSE,unassign.string=NULL){  
+  RESULT<-data.frame(stringsAsFactors = F)
+  subset_phylos<-prune_taxa(taxa_names(which.phyloseq)%in%which.taxa,which.phyloseq)
+  SSUMS<-sample_sums(which.phyloseq)
+  for(i in 1: length(which.taxa))
+    {
+      actual.phylos<-prune_taxa(taxa_names(which.phyloseq)%in%which.taxa[i],which.phyloseq)
+      Abundance<-as.numeric(otu_table(actual.phylos))  
+      OTU<-rep(which.taxa[i],length(Abundance))
+      Seq.tot<-rep(SSUMS[i],length(Abundance))
+      Seq.tot<-SSUMS
+      Taxo.actual<-as.character(tax_table(actual.phylos))
+      if(manage.ussigned==T){
+        for(j in 2: length(Taxo.actual)){
+          if(is.na(Taxo.actual[j])){Taxo.actual[j]<-ifelse(regexpr(unassign.string,Taxo.actual[j-1])>0,
+                                           Taxo.actual[j-1],paste(Taxo.actual[j-1],unassign.string,sep=""))}
+        }
+      }
+      
+      Taxo.actual.rbind<-do.call("rbind", replicate(length(sample_sums(actual.phylos)), Taxo.actual, simplify = FALSE))
+      colnames(Taxo.actual.rbind)<-colnames(tax_table(which.phyloseq))
+      Sd<-sample_data(actual.phylos)
+      TEMP<-data.frame(Abundance,OTU,Seq.tot,Taxo.actual.rbind,Sd,stringsAsFactors = F)
+      RESULT<-rbind(RESULT,TEMP)
+    }
+    RESULT
+}
+
+DD<-phyloseq_2_GG(which.taxa=SIG_ASVs,
+                  which.phyloseq=PS2_cor,
+                  manage.ussigned=T,
+                  unassign.string="")
+DD$NAME<-paste(DD$Family,"\n",DD$OTU,sep="")
+DD$altitude<-factor(DD$altitude,levels = c("low","middle","high"))
+
+#plot
+ggplot(data=DD,aes(y=(Abundance/Seq.tot)^0.5,x=altitude))+
+  geom_boxplot(outlier.shape = NA)+
+  geom_jitter(alpha=0.3,aes(color=pop))+
+  facet_wrap(.~NAME,scales = "free")
+
+
+
+```
+
+*13 - OTU differential abundance testing with DESeq2*
+```{r warning=F, message=F}
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+
+#exclude "out" samples from dataset
+'%!in%' <- function(x,y)!('%in%'(x,y))
+PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #exclude out samples
+
+ds = phyloseq_to_deseq2(PS2_cor, ~ altitude) #convert the phyloseq database to DESeq2 datatable
+
+gm_mean = function(x, na.rm=TRUE){
+  exp(sum(log(x[x > 0]), na.rm=na.rm) / length(x))
+}
+geoMeans = apply(counts(ds), 1, gm_mean)
+ds = estimateSizeFactors(ds, geoMeans = geoMeans)
+
+ds = DESeq(ds, test="LRT", reduced= ~ 1, fitType="parametric")
+
+res = results(ds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(PS2_cor)[rownames(sigtab), ], "matrix"))
+
+SIG=row.names(sigtab)
+
+
+# Visualise the results
+phyloseq_2_GG<-function(which.taxa,which.phyloseq,manage.ussigned=FALSE,unassign.string=NULL){  
+  RESULT<-data.frame(stringsAsFactors = F)
+  subset_phylos<-prune_taxa(taxa_names(which.phyloseq)%in%which.taxa,which.phyloseq)
+  SSUMS<-sample_sums(which.phyloseq)
+  for(i in 1: length(which.taxa))
+    {
+      actual.phylos<-prune_taxa(taxa_names(which.phyloseq)%in%which.taxa[i],which.phyloseq)
+      Abundance<-as.numeric(otu_table(actual.phylos))  
+      OTU<-rep(which.taxa[i],length(Abundance))
+      Seq.tot<-rep(SSUMS[i],length(Abundance))
+      Seq.tot<-SSUMS
+      Taxo.actual<-as.character(tax_table(actual.phylos))
+      if(manage.ussigned==T){
+        for(j in 2: length(Taxo.actual)){
+          if(is.na(Taxo.actual[j])){Taxo.actual[j]<-ifelse(regexpr(unassign.string,Taxo.actual[j-1])>0,
+                                           Taxo.actual[j-1],paste(Taxo.actual[j-1],unassign.string,sep=""))}
+        }
+      }
+      
+      Taxo.actual.rbind<-do.call("rbind", replicate(length(sample_sums(actual.phylos)), Taxo.actual, simplify = FALSE))
+      colnames(Taxo.actual.rbind)<-colnames(tax_table(which.phyloseq))
+      Sd<-sample_data(actual.phylos)
+      TEMP<-data.frame(Abundance,OTU,Seq.tot,Taxo.actual.rbind,Sd,stringsAsFactors = F)
+      RESULT<-rbind(RESULT,TEMP)
+    }
+    RESULT
+}
+
+
+TT<-phyloseq_2_GG(which.taxa=SIG,
+                  which.phyloseq=PS2_cor,
+                  manage.ussigned=FALSE,unassign.string=NA)
+
+
+TT$OTU=as.factor(TT$OTU)
+levels(TT$OTU)=1:length(levels(TT$OTU))
+TT$new=paste(TT$Family,TT$OTU)
+
+
+GG<-ggplot(TT,aes(y=Abundance/Seq.tot,x=pop))+geom_boxplot(outlier.shape = NA)+geom_jitter()+facet_wrap(~new,scales = "free")
+
+GG$data$pop<- as.character(GG$data$pop)
+GG$data$pop<-factor(x = GG$data$pop, levels = unique(GG$data$pop[order(as.character(GG$data$alt2))]))
+
+GG+ ggtitle("OTU differential abundance testing with DESeq2")
+
+```
+
+
+*14 - Effect of the sampling year, body mass and sex*
+```{r warning=F, message=F}
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+
+# 1- relative abundance
+PS_year <- merge_samples(PS2_cor, "year")
+total = median(sample_sums(PS2_cor))
+standf = function(x, t=total) round(t * (x / sum(x)))
+PS_year = transform_sample_counts(PS_year, standf)
+
+p=plot_bar(PS_year, fill = "Phylum") + 
+  geom_bar(aes(color=Phylum, fill=Phylum), stat="identity", position="stack") + ggtitle("Relative Abundance of Dominant Bacterial Phyla by year")
+
+
+# 2- beta diversity
+
+random_tree = rtree(ntaxa(PS2_cor), rooted=TRUE, tip.label=taxa_names(PS2_cor))
+PS2_cor = merge_phyloseq(PS2_cor, random_tree)
+
+## 3- Beta Diversity: Plot the PCoA using Bray-Curtis distance: YEAR
+
+bray_dist= phyloseq::distance(PS2_cor, method="bray", weighted=F)
+ordination = ordinate(PS2_cor, method="PCoA", distance="bray")
+p=plot_ordination(PS2_cor, ordination, shape="pop", color="year") + theme(aspect.ratio=1)+ ggtitle("Beta Diversity. PCoA using the Bray-Curtis distance (by location and year)") + geom_point(size=2.5) +scale_y_reverse()
+
+## PERMANOVA ##
+adonis2(bray_dist ~ sample_data(PS2_cor)$year)     ##significant
+
+# 4- mixed models
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor)
+
+#Scores for first (two?) PCOA axes could be use a model response instead of alpha diversity analyses
+
+PHYLOSEQ2.trans<-transform_sample_counts(PHYLOSEQ2.rare,function(x) x/sum(x))
+DIST<-vegdist(otu_table(PHYLOSEQ2.trans))
+ORD<-ordinate(PHYLOSEQ2.trans,method="PCoA",distance = DIST)
+plot_ordination(PHYLOSEQ2.trans,ORD,color="year")
+ORD_df<-plot_ordination(PHYLOSEQ2.trans,ORD,justDF = T)
+
+model_null<-glmmTMB(Axis.1~1+(1|altitude+pop),data=ORD_df) 
+model_year<-glmmTMB(Axis.1~year+(1|altitude+pop),data=ORD_df)
+
+summary(model_year)
+anova(model_null,model_year) #cat model explains better than null
+
+
+qqnorm(resid(model_year))
+qqline(resid(model_year)) #there seems to be one residual - probably delete and refit the model
+
+#5- altitude mdmr
+mdmr.res <- MDMR::mixed.mdmr(~year+
+                               (altitude| pop),
+                             data =ORD_df,D = DIST)
+summary(mdmr.res)
+
+#6- effect of body mass
+PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor)
+
+RICH<-estimate_richness(PHYLOSEQ2.rare)
+RICH<-data.frame(RICH,sample_data(PHYLOSEQ2.rare))
+
+model_mass<-glmmTMB(Shannon~weight+(1|pop),data=RICH)
+summary(model_mass) # p=0.5 NS
+
+# 7- effect of sex
+
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH)
+model_sex<-glmmTMB(Shannon~sex+(1|pop),data=RICH)
+summary(model_sex)#NS
+anova(model_null, model_sex) #NS
+
+# 8- Beta diversity effect of sex
+PHYLOSEQ2.trans<-transform_sample_counts(PHYLOSEQ2.rare,function(x) x/sum(x))
+DIST<-vegdist(otu_table(PHYLOSEQ2.trans))
+ORD<-ordinate(PHYLOSEQ2.trans,method="PCoA",distance = DIST)
+plot_ordination(PHYLOSEQ2.trans,ORD,color="sex")
+ORD_df<-plot_ordination(PHYLOSEQ2.trans,ORD,justDF = T)
+
+model_null<-glmmTMB(Axis.1~1+(1|altitude+pop),data=ORD_df) 
+model_sex<-glmmTMB(Axis.1~sex+(1|altitude+pop),data=ORD_df)
+
+summary(model_sex) #NS
+anova(model_null,model_sex) #NS
+
+#second axis
+model_null<-glmmTMB(Axis.2~1+(1|altitude+pop),data=ORD_df) 
+model_sex<-glmmTMB(Axis.2~sex+(1|altitude+pop),data=ORD_df) # p is barely significant 0.0475
+
+# 9 - MDMR
+mdmr.res <- MDMR::mixed.mdmr(~sex+
+                               (1|pop),
+                             data =ORD_df,D = DIST)
+summary(mdmr.res) # p is barely significant 0.0412
+
+mdmr.res <- MDMR::mixed.mdmr(~sex+
+                               (1|altitude),
+                             data =ORD_df,D = DIST)
+
+summary(mdmr.res) # NS, p=0.088
+
+mdmr.res <- MDMR::mixed.mdmr(~sex+
+                               (pop|altitude),
+                             data =ORD_df,D = DIST)
+
+summary(mdmr.res) # NS, p=0.024
+
+# 10 - Beta Diversity: Plot the PCoA using the weighted UniFrac as distance (takes account phylogeny):
+wunifrac_dist = phyloseq::distance(PS2_cor, method="unifrac", weighted=T)
+ordination = ordinate(PS2_cor, method="PCoA", distance=wunifrac_dist)
+p=plot_ordination(PS2_cor, ordination, color="sex") + theme(aspect.ratio=1)+ ggtitle("Beta Diversity. PCoA using the Weighted Unifrac distance")+ scale_y_reverse() + geom_point(size=2)
+
+
+# 11 - Beta Diversity: Plot the PCoA using Bray-Curtis distance:
+bray_dist= phyloseq::distance(PS2_cor, method="bray", weighted=F)
+ordination = ordinate(PS2_cor, method="PCoA", distance="bray")
+p=plot_ordination(PS2_cor, ordination, color="sex") + theme(aspect.ratio=1)+ ggtitle("Beta Diversity. PCoA using the Bray-Curtis distance") + geom_point(size=2)
+
+# 12 - PERMANOVA 
+adonis2(wunifrac_dist ~ sample_data(PS2_cor)$sex) #NS
+adonis2(bray_dist ~ sample_data(PS2_cor)$sex)     ##NS
+```
+
+*15 - Microsatellite Dataset, The correlation between host genetics and microbiome*
+```{r warning=F, message=F}
+#D:\MolSys\Nannospalax Microsatellite\2021 Microsats"
+#USE 1 minus RELATEDNESS
+#pairwise fst and merge population microbiome to create 6x6 matrix
+
+rm(list = ls())
+#Load Packages
+library(adegenet)
+library(poppr)
+library(pegas)
+library(PopGenReport)
+library(hierfstat)
+library(factoextra)
+
+#read file
+STR=read.delim("D:/MolSys/2021 Microsats/2ndrun (1)/all_adegenet2.txt", header=T) 
+ALL=read.delim("D:/MolSys/2021 Microsats/2ndrun (1)/all_microsat_adegenet.txt", header=T)
+
+
+#Genind
+ALT=df2genind(STR[,4:16],ncode = 3,ploidy = 2,pop = STR[,2],ind.names = STR[,1])
+ALL=df2genind(ALL[,4:16],ncode = 3,ploidy = 2,pop = ALL[,3],ind.names = ALL[,1])
+
+indNames(ALT)
+popNames(ALT)
+locNames(ALT)
+
+indNames(ALL)
+popNames(ALL)
+locNames(ALL)
+
+
+summary(ALT)
+summary(ALT[pop="ereg"])
+summary(ALT[pop="ulu"])
+summary(ALT[pop="dar"])
+summary(ALT[pop="mad"])
+summary(ALT[pop="kara"])
+summary(ALT[pop="kizil"])
+
+#Pairwise Fst
+library(graph4lg)
+Msatmat=mat_gen_dist(ALT, dist = "PCA", null_val = FALSE)
+
+#Mean Proportions of shared Alleles
+pair_Sh=function(g,x,y) {ps=propShared(g[pop=c(x,y)]);colnames(ps)=g[pop=c(x,y)]@pop;ps[which(is.nan(ps))]=NA;mean(sapply(which(colnames(ps)==x),function(u){mean(ps[which(colnames(ps)==y),u])}),na.rm=T)}
+
+pair_Sh(ALT,"1","2")
+pair_Sh(ALT,"1","3")
+pair_Sh(ALT,"2","3")
+
+#PCA two axes
+#Tutorial here: https://adegenet.r-forge.r-project.org/files/PRstats/practical-MVAintro.1.0.pdf
+x=tab(ALL, freq=TRUE, NA.method="mean") #freq=T means standardised, NA=mean, use mean for NA samples
+ifpca.x=dudi.pca(x, center=TRUE, scale=FALSE)
+s.class(ifpca.x$li, fac=pop(ALL),col=transp(funky(15),.6),axesel=FALSE, cstar=0, cpoint=3)
+add.scatter.eig(ifpca.x$eig[1:34],3,1,2, ratio=.2)
+
+
+# 1- The correlation between host genetics and microbiome
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+
+sample_data(PS2_cor)$altitude=c("2","2","2","2","2","2",
+                                "2","1"  ,"1","1","1","3","3","3",
+                                "3","3","3","3","3","3","3","1",
+                                "1","1","1","1","2","2","2",
+                                "2" ,"2" ,"2" ,"2" ,"2" ,"1",
+                                "1","1" ,"1","3","3","3","3","3",
+                                "3","3","3" ,"3" ,"1" ,"1" ,"1" ,
+                                "1")
+
+total = median(sample_sums(PS))
+standf = function(x, t=total) round(t * (x / sum(x)))
+
+
+#merge altitute
+PS_alt <- merge_samples(PS, "alt")
+PS_alt = transform_sample_counts(PS_alt, standf)
+
+
+MBIO= ordinate(PS_alt, method="PCoA", distance="bray")
+
+
+#calculate eucledian distances from the coordinates, distance matrix
+library(sf)
+library(geosphere)
+
+x <- data.frame(MBIO$vectors[,1])
+y <- data.frame(MBIO$vectors[,2])
+df <- data.frame(longitude = x, latitute= y)
+MBIO_MAT <- distm(df, fun= distGeo)
+
+Msatmat
+MBIO_MAT
+
+
+mantel.test(MBIO_MAT, Msatmat, nperm = 999, alternative="two.sided") #p=0.979
+
+# 3- Check the Hardy-Weinberg
+summary(gstr)
+summary(gstr[pop="eregli"])
+summary(gstr[pop="ulukisla"])
+summary(gstr[pop="madenkoy"])
+summary(gstr[pop="darbogaz"])
+summary(gstr[pop="karagol"])
+summary(gstr[pop="kiziltepe"])
+
+#HWE test
+hw.test(gstr[pop="eregli"])
+hw.test(gstr[pop="ulukisla"])
+hw.test(gstr[pop="madenkoy"])
+hw.test(gstr[pop="darbogaz"])
+hw.test(gstr[pop="karagol"])
+hw.test(gstr[pop="kiziltepe"])
+
+
+# 4- Proportions of shared Alleles
+shared_prop=propShared(gstr)
+write.csv(shared_prop,"D:/Rwd/16sFin/16sFin/tables/shared_prob.csv")
+
+# 5- Mean Proportions of shared Alleles
+pair_Sh=function(g,x,y) {ps=propShared(g[pop=c(x,y)]);colnames(ps)=g[pop=c(x,y)]@pop;ps[which(is.nan(ps))]=NA;mean(sapply(which(colnames(ps)==x),function(u){mean(ps[which(colnames(ps)==y),u])}),na.rm=T)}
+
+pair_Sh(gstr,"eregli","ulukisla")
+pair_Sh(gstr,"eregli","madenkoy")
+pair_Sh(gstr,"eregli","darbogaz")
+pair_Sh(gstr,"eregli","karagol")
+pair_Sh(gstr,"eregli","kiziltepe")
+
+pair_Sh(gstr,"ulukisla","madenkoy")
+pair_Sh(gstr,"ulukisla","darbogaz")
+pair_Sh(gstr,"ulukisla","karagol")
+pair_Sh(gstr,"ulukisla","kiziltepe")
+
+pair_Sh(gstr,"madenkoy","darbogaz")
+pair_Sh(gstr,"madenkoy","karagol")
+pair_Sh(gstr,"madenkoy","kiziltepe")
+
+pair_Sh(gstr,"darbogaz","karagol")
+pair_Sh(gstr,"darbogaz","kiziltepe")
+
+pair_Sh(gstr,"karagol","kiziltepe")
+
+# 6- Pairwise Fst
+gstr$pop=factor(gstr$pop, levels=c("eregli", "ulukisla", "madenkoy", "darbogaz", "karagol", "kiziltepe"))
+popNames(gstr)
+
+pairwise.WCfst(gstr)
+write.csv(pair,"pairwise_fst.csv")
+# 7- HeatMap
+heatmap(as.matrix(bruvo.dist(gstr,c(2,2,2,2,2,2,2))),symm = TRUE,labRow = gstr@pop)
+
+# 8- PCA for all dataset
+x=tab(gstr, freq=TRUE, NA.method="mean") #freq=T means standardised, NA=mean, use mean for NA samples
+ifpca.x=dudi.pca(x, center=TRUE, scale=FALSE)
+s.class(ifpca.x$li, fac=pop(gstr), col=funky(23))
+fviz_pca_ind(ifpca.x, repel=T, habillage=gstr$pop, addEllipses = T, col=funky(3),ellipse.type="confidence", legend.title="Populations", geom="point")
+
+# 9 - related package to check host genetic relatedness
+rm(list = ls())
+library(related)
+
+ALL=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/ALL_related.txt")
+ERG=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/eregli2.txt")
+DAR=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/darbogaz2.txt")
+KAR=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/karagol2.txt")
+KIZ=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/kiziltepe2.txt")
+MAD=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/madenkoy2.txt")
+ULU=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/ulukisla2.txt")
+
+#coancestry function causes to collapse R studio in my system. So, I did it with other pc and imported the results
+
+#Import the results of coancestry 
+
+#XX_co = coancestry(data, lynchrd=2, wang=2)
+#XX_sim=familysim(data$freqs,100)
+#XX_sim_co=coancestry(data, lynchrd=2, wang=2)
+
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Dr_co.gz")
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Dr_sim_co.gz")
+
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Kr_co.gz")
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Kr_sim_co.gz")
+
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Er_co.gz")
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Er_sim_co.gz")
+
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Kz_co.gz")
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Kz_sim_co.gz")
+
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Md_co.gz")
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Md_sim_co.gz")
+
+
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Ul_co.gz")
+load("D:/MolSys/2021 Microsats/2ndrun (1)/oleksiy related/Ul_sim_co.gz")
+
+
+write.table(Er_co$relatedness, file = "D:/MolSys/2021 Microsats/2ndrun (1)/related/relatedness tables/ERG.csv")
+write.table(Ul_co$relatedness, file = "D:/MolSys/2021 Microsats/2ndrun (1)/related/relatedness tables/ULU.csv")
+write.table(Dr_co$relatedness, file = "D:/MolSys/2021 Microsats/2ndrun (1)/related/relatedness tables/DAR.csv")
+write.table(Md_co$relatedness, file = "D:/MolSys/2021 Microsats/2ndrun (1)/related/relatedness tables/MAD.csv")
+write.table(Kz_co$relatedness, file = "D:/MolSys/2021 Microsats/2ndrun (1)/related/relatedness tables/KIZ.csv")
+write.table(Kr_co$relatedness, file = "D:/MolSys/2021 Microsats/2ndrun (1)/related/relatedness tables/KAR.csv")
+
+ALL_T=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatedness/ALL_T.csv")
+ERG_T=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatedness/ERG_T.csv")
+ULU_T=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatedness/ULU_T.csv")
+DAR_T=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatedness/DAR_T.csv")
+MAD_T=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatedness/MAD_T.csv")
+KIZ_T=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatedness/KIZ_T.csv")
+KAR_T=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatedness/KAR_T.csv")
+
+
+# 10 - Check the correlation between host relatedness and microbiome 
+
+load("D:/Rwd/phyloseq_fin/PS2_cor.R") #load phyloseq data
+'%!in%' <- function(x,y)!('%in%'(x,y))
+PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #exclude out samples
+
+ERG_M=subset_samples(PS2_cor, pop %in% "eregli"==T)
+ULU_M=subset_samples(PS2_cor, pop %in% "ulukisla"==T)
+
+
+sample_names(ULU_M) #c("U06", "U07", "U08", "U09") should be excluded bcuz they are not in STR dataset
+ULU_M= subset_samples(ULU_M, sample_ID %!in% c("U06", "U07", "U08", "U09")==T)
+
+DAR_M=subset_samples(PS2_cor, pop %in% "darbogaz"==T)
+MAD_M=subset_samples(PS2_cor, pop %in% "madenkoy"==T)
+KIZ_M=subset_samples(PS2_cor, pop %in% "kiziltepe"==T)
+KAR_M=subset_samples(PS2_cor, pop %in% "karagol"==T)
+
+# 11 - calculate PCoA for each pop
+
+ERG_PC = ordinate(ERG_M, method="PCoA", distance="bray")
+ULU_PC = ordinate(ULU_M, method="PCoA", distance="bray")
+DAR_PC = ordinate(DAR_M, method="PCoA", distance="bray")
+MAD_PC = ordinate(MAD_M, method="PCoA", distance="bray")
+KIZ_PC = ordinate(KIZ_M, method="PCoA", distance="bray")
+KAR_PC = ordinate(KAR_M, method="PCoA", distance="bray")
+
+
+# 12 - calculate eucledian distances from the coordinates, distance matrix
+library(sf)
+library(geosphere)
+
+x <- data.frame(ERG_PC$vectors[,1])
+y <- data.frame(ERG_PC$vectors[,2])
+df <- data.frame(longitude = x, latitute= y)
+ERG_MAT <- distm(df, fun= distGeo)
+
+x <- data.frame(ULU_PC$vectors[,1])
+y <- data.frame(ULU_PC$vectors[,2])
+df <- data.frame(longitude = x, latitute= y)
+ULU_MAT <- distm(df, fun= distGeo)
+
+x <- data.frame(DAR_PC$vectors[,1])
+y <- data.frame(DAR_PC$vectors[,2])
+df <- data.frame(longitude = x, latitute= y)
+DAR_MAT <- distm(df, fun= distGeo)
+
+
+x <- data.frame(MAD_PC$vectors[,1])
+y <- data.frame(MAD_PC$vectors[,2])
+df <- data.frame(longitude = x, latitute= y)
+MAD_MAT <- distm(df, fun= distGeo)
+
+x <- data.frame(KIZ_PC$vectors[,1])
+y <- data.frame(KIZ_PC$vectors[,2])
+df <- data.frame(longitude = x, latitute= y)
+KIZ_MAT <- distm(df, fun= distGeo)
+
+
+x <- data.frame(KAR_PC$vectors[,1])
+y <- data.frame(KAR_PC$vectors[,2])
+df <- data.frame(longitude = x, latitute= y)
+KAR_MAT <- distm(df, fun= distGeo)
+
+
+#*_MAT is distance matrix of PCoA values from 16s data
+#*_STR_MAT is distance matrix of relatedness
+
+ERG_STR_MAT=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatednessmat/ERG_STR_MAT.csv")
+ULU_STR_MAT=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatednessmat/ULU_STR_MAT.csv")
+DAR_STR_MAT=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatednessmat/DAR_STR_MAT.csv")
+MAD_STR_MAT=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatednessmat/MAD_STR_MAT.csv")
+KIZ_STR_MAT=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatednessmat/KIZ_STR_MAT.csv")
+KAR_STR_MAT=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/relatednessmat/KAR_STR_MAT.csv")
+
+ERG_STR_MAT=as.matrix(ERG_STR_MAT[,-1])
+ULU_STR_MAT=as.matrix(ULU_STR_MAT[,-1])
+DAR_STR_MAT=as.matrix(DAR_STR_MAT[,-1])
+MAD_STR_MAT=as.matrix(MAD_STR_MAT[,-1])
+KIZ_STR_MAT=as.matrix(KIZ_STR_MAT[,-1])
+KAR_STR_MAT=as.matrix(KAR_STR_MAT[,-1])
+
+ERG_STR_MAT[upper.tri(ERG_STR_MAT)]=ERG_STR_MAT[lower.tri(ERG_STR_MAT)]
+ULU_STR_MAT[upper.tri(ULU_STR_MAT)]=ULU_STR_MAT[lower.tri(ULU_STR_MAT)]
+DAR_STR_MAT[upper.tri(DAR_STR_MAT)]=DAR_STR_MAT[lower.tri(DAR_STR_MAT)]
+MAD_STR_MAT[upper.tri(MAD_STR_MAT)]=MAD_STR_MAT[lower.tri(MAD_STR_MAT)]
+KIZ_STR_MAT[upper.tri(KIZ_STR_MAT)]=KIZ_STR_MAT[lower.tri(KIZ_STR_MAT)]
+KAR_STR_MAT[upper.tri(KAR_STR_MAT)]=KAR_STR_MAT[lower.tri(KAR_STR_MAT)]
+
+
+# 12- Mantel Test for Similarity of Two Matrices
+library(ape)
+
+mantel.test(ERG_MAT, ERG_STR_MAT, nperm = 999, alternative="two.sided") #p=0.069
+mantel.test(ULU_MAT, ULU_STR_MAT, nperm = 999, alternative="two.sided") #p=0.741
+mantel.test(DAR_MAT, DAR_STR_MAT, nperm = 999, alternative="two.sided") # p=0.053
+mantel.test(MAD_MAT, MAD_STR_MAT, nperm = 999, alternative="two.sided") # p=0.757
+mantel.test(KIZ_MAT, KIZ_STR_MAT, nperm = 999, alternative="two.sided") #p=0.043
+mantel.test(KAR_MAT, KAR_STR_MAT, nperm = 999, alternative="two.sided") #p=0.421 NS
+
+#Import the dataset with just location names to Calculate average within-group relatedness and compare to expected values.
+
+ALLpop=readgenotypedata("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/related_all_pop.txt")
+grouprel(ALLpop$gdata, estimatorname = "wang", usedgroups = "all", iterations = 100)
+
+
+ad=read.csv("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/results/relatedness and p values.csv")
+
+ggplot(ad, aes(x=relatedness, y=p.values))+geom_point(aes(color=pop), size=4)
+
+#correlation test between Mantel test p values and mean relatedness
+
+cor.test(ad$relatedness, ad$p.values) #p=0.722 and correlation is 0.18
+
+
+```
+
