@@ -44,4 +44,4 @@ The script contains the steps below:
 15 - Microsatellite Dataset, The correlation between host genetics and microbiome
 
 
-If you have any problems, contact me on mr.solak@hotmail.com.
+If you have any problems, you can find my contact details in the article.
