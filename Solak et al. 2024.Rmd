@@ -184,7 +184,7 @@ Rscript --vanilla /truba/scratch/hsolak/scripts/Rscripts/dada.R ##dada.R is the 
 #After you get the seqtab file, you can import seqtab in R and start analysis with phyloseq R package.
 ```
 
-*3-Dada2 get REF.fasta [use Bash Terminal, not R]*
+*3-Dada2 get REF.fasta*
 ```{r setup, warning=F, message=F}
 rm(list = ls())
 #load the seqtab
@@ -251,17 +251,17 @@ PS2
 
 
 ## Add metadata
-MET<-read.delim("D:/Rwd/16sFin/16sFin/metadata2222.csv",
-                header = T,
-                stringsAsFactors = F, sep=","
-              )
+# MET<-read.delim("D:/Rwd/16sFin/16sFin/metadata2222.csv",
+#                 header = T,
+#                 stringsAsFactors = F, sep=","
+#               )
 dim(MET)
 head(MET)
 
 SN<-paste(MET$adaptorN,MET$adaptorS,"_F_",MET$primerF,"R",sep="") #combine F and R Primers and inline barcodes, these are sample ID
 
 
-SSUM<-sample_sums(PHYLOSEQ2) #Returns the total number of individuals observed from each sample
+SSUM<-sample_sums(PHYLOSEQ2) #Returns the total number of sequences observed from each sample
 SNAMES<-sample_names(PHYLOSEQ2) #Get sample names
 
 NOT_IN_META<-data.frame(SSUM,SNAMES) #Combined data frame of sample names and total number of reads
@@ -482,64 +482,8 @@ write.table(DF,"D:/Rwd/16sFin/16sFin/tables/2SSUMS_SUMMARY.txt",row.names = F,qu
 
 ```
 
-*9D - Venn Diagrams*
-```{r warning=F, message=F}
-#Tutorial is here : https://microbiome.github.io/tutorials/core_venn.html
 
-#install.packages("eulerr") # If not installed
-library(eulerr)
-library(microbiome)
-#devtools::install_github('microsud/microbiomeutilities')
-library(microbiomeutilities)
-
-load("D:/Rwd/phyloseq_fin/PS2_cor.R")
-
-#exclude "out" samples from dataset
-'%!in%' <- function(x,y)!('%in%'(x,y))
-PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #exclude out samples
-
-# simple way to count number of samples in each group
-table(meta(PS2_cor)$pop, useNA = "always")
-
-pseq.rel <- microbiome::transform(PS2_cor, "compositional")
-
-#Make a list of DiseaseStates.
-
-disease_states  <- unique(as.character(meta(pseq.rel)$altitude))
-print(disease_states)
-
-
-
-#Write a for loop to go through each of the disease_states one by one and combine identified core taxa into a list.
-
-list_core <- c() # an empty object to store information
-
-for (n in disease_states){ # for each variable n in DiseaseState
-    #print(paste0("Identifying Core Taxa for ", n))
-    
-    ps.sub <- subset_samples(pseq.rel, altitude == n) # Choose sample from DiseaseState by n
-    
-    core_m <- core_members(ps.sub, # ps.sub is phyloseq selected with only samples from g 
-                           detection = 0.001, # 0.001 in atleast 90% samples 
-                           prevalence = 0.75)
-    print(paste0("No. of core taxa in ", n, " : ", length(core_m))) # print core taxa identified in each DiseaseState.
-    list_core[[n]] <- core_m # add to a list core taxa for each group.
-    #print(list_core)
-}
-
-mycols <- c(nonCRC="#d6e2e9", CRC="#cbf3f0", H="#fcf5c7") 
-plot(venn(list_core),
-     fills = mycols)
-
-#do it for sampling localities
-library(ggVennDiagram)
-ggvenn_pq(physeq = PS2_cor, fact = "pop")
-
-
-
-```
 *10 - Barplots*
-
 ```{r warning=F, message=F}
 rm(list = ls())
 load("D:/Rwd/phyloseq_fin/PS2_cor.R")
@@ -588,10 +532,11 @@ c25 <- c("gray70","green4", # red
          "darkturquoise","green1","yellow4","yellow3",
          "darkorange4","brown")
 
-p=plot_bar(PS_alt, fill = "Phylum") + geom_bar(stat="identity", position="stack") +scale_fill_manual(values=c25)
+p=plot_bar(PS_alt, fill = "Phylum") + geom_bar(stat="identity", position="stack") 
 
 # Change order of X axis by altitude group
 p=p + aes(x = fct_reorder(Sample, p$data$alt2))
+p=p+ theme_classic()+ theme(text = element_text(size = 18), axis.text.x = element_text(angle = 90, hjust = 1))
 
 
 # 3- Phylum by population (or sampling localities) 
@@ -600,13 +545,15 @@ PHYLOSEQ_population = transform_sample_counts(PHYLOSEQ_population, standf)
 
 p1=plot_bar(PHYLOSEQ_population, fill = "Phylum") + geom_bar(stat="identity", position="stack") +scale_fill_manual(values=c25)
 
+p1=p1+ theme_classic()+ theme(text = element_text(size = 18), axis.text.x = element_text(angle = 90, hjust = 1))
+
 # Change order of X axis by altitude group
 library(forcats)
 p1=p1 + aes(x = fct_reorder(Sample, p1$data$alt2))
 
 #combine plots
 library(ggpubr)
-ggarrange(p, p1, ncol=2, nrow=1, common.legend = TRUE, legend="bottom")
+ggarrange(p, p1, ncol=2, nrow=1, common.legend = TRUE, legend="right")
 
 
 # 4- Phylum by sex 
@@ -702,16 +649,13 @@ phenotypes_melted <- melt(phenotypes)
 
 p=ggplot(phenotypes_melted, aes(x = variable, y = value, fill = Alt)) +
   geom_boxplot() +
-  labs(title = "Bacterial Phenotypes Boxplot by Altitude",
+  labs(
        x = "Phenotypes",
        y = "Values",
-       fill = "Altitude") +
+       fill = "Altitude") +theme_classic()+
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 
-comp=list(c("low","middle"),c("middle","high"),c("low","high"))
-symnum.args=list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
 
-p+stat_compare_means(method = "wilcox.test", comparisons = comp, label = "p.signif", symnum.args = symnum.args)
 
 ```
 
@@ -750,6 +694,8 @@ p=plot_richness(PS2_cor, x="altitude", measures=c("Observed", "Simpson", "Shanno
 
 #order x axis by altitude
 p=p+aes(x = fct_reorder(altitude, p$data$alt2))
+p=p+ theme_classic()+ theme(text = element_text(size = 18), axis.text.x = element_text(angle = 90, hjust = 1))
+
 
 comp=list(c("low","middle"),c("middle","high"),c("low","high"))
 symnum.args=list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
@@ -782,7 +728,7 @@ PS2_cor = merge_phyloseq(PS2_cor, random_tree) #merge the tree and phyloseq
 ##Beta Diversity: Plot the PCoA using Bray-Curtis distance:
 bray_dist= phyloseq::distance(PS2_cor, method="bray", weighted=F)
 ordination = ordinate(PS2_cor, method="PCoA", distance="bray")
-p=plot_ordination(PS2_cor, ordination, color="altitude", shape = "pop") + theme(aspect.ratio=1)+ ggtitle("Beta Diversity. PCoA using the Bray-Curtis distance") + geom_point(size=2)
+p=plot_ordination(PS2_cor, ordination, color="altitude", shape = "pop") + theme(aspect.ratio=1)+ ggtitle("Beta Diversity. PCoA using the Bray-Curtis distance") + geom_point(size=5)+ theme(text = element_text(size = 20),legend.text=element_text(size=20))+theme_classic()
 
 plot_ordination(PS2_cor, ordination, color="altitude", shape = "pop") + theme(aspect.ratio=1, legend.text = element_text(size = 12)) +geom_point(size=3) + scale_x_reverse() + scale_y_reverse() +  scale_shape_manual(values=c(0,4,21,3,15,17))
 
@@ -865,6 +811,12 @@ RICH=read.csv("D:/Rwd/16sFin/16sFin/plots/cor/RICH.csv")
 model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
 model_cat<-glmmTMB(Shannon~altitude+(1|pop),data=RICH) #significant middle
 
+model_null<-glmmTMB(Simpson~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Simpson~altitude+(1|pop),data=RICH) #significant middle
+
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~altitude+(1|pop),data=RICH) #significant middle
+
 #2. model comparission
 AIC(model_null,model_cat,model_cat2,model_cat3) #
 anova(model_null,model_cat) #the altitude category doesn't explain the data better compared to null model.
@@ -909,10 +861,6 @@ qqline(resid(model_cat))
 
 
 # 3- Beta Diversity MDMR
-#MDMR calculates mixed models for distance data
-#should be definetly used - models with PCoA capture only relatively low fraction of variation in the microbiota (11 and 10% for the first and the second axes, respectively)
-#but information you can see in the MDMR output are limited
-#you probably conduct separate analyses to compare high ~ middle, low ~ middle etc samples. 
 
 #altitude mdmr
 mdmr.res <- MDMR::mixed.mdmr(~alt2+
@@ -1036,7 +984,6 @@ ggplot(data=DD,aes(y=(Abundance/Seq.tot)^0.5,x=altitude))+
 ```{r warning=F, message=F}
 rm(list = ls())
 load("D:/Rwd/phyloseq_fin/PS2_cor.R")
-
 #exclude "out" samples from dataset
 '%!in%' <- function(x,y)!('%in%'(x,y))
 PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #exclude out samples
@@ -1061,9 +1008,9 @@ PS_fam = transform_sample_counts(PS_fam, standf)
 res <- DA.kru(data = PS_fam, predictor = "altitude", relative = TRUE, p.adj = "fdr")
 write.table(res, file="D:/Rwd/16sFin/16sFin/tables/cor/comp_kru_fam.csv")
 
-#DESeq2 Package
-
-
+###############DESeq2  
+library(phyloseq)
+library(glmmTMB)
 ds = phyloseq_to_deseq2(PS2_cor, ~ altitude) #convert the phyloseq database to DESeq2 datatable
 
 gm_mean = function(x, na.rm=TRUE){
@@ -1073,19 +1020,12 @@ geoMeans = apply(counts(ds), 1, gm_mean)
 ds = estimateSizeFactors(ds, geoMeans = geoMeans)
 
 ds = DESeq(ds, test="LRT", reduced= ~ 1, fitType="parametric")
+res = results(ds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(PS2_cor)[rownames(sigtab), ], "matrix"))
 
-###############################
-exclusive_ASVs <- NULL
-for (i in levels(sample_data(PS2_cor)$altitude)) {
-    ds_temp <- DESeq(ds, test = "LRT", reduced = ~1, fitType = "parametric")
-    sig_ASVs <- rownames(results(ds_temp, tidy = TRUE)[results(ds_temp, tidy = TRUE)$padj < 0.05, ])
-    if (i == levels(sample_data(PS2_cor)$altitude)[1]) {
-        exclusive_ASVs <- sig_ASVs
-    } else {
-        exclusive_ASVs <- intersect(exclusive_ASVs, sig_ASVs)
-    }
-}
-
+SIG=row.names(sigtab)
 
 # Visualise the results
 phyloseq_2_GG<-function(which.taxa,which.phyloseq,manage.ussigned=FALSE,unassign.string=NULL){  
@@ -1127,12 +1067,246 @@ levels(TT$OTU)=1:length(levels(TT$OTU))
 TT$new=paste(TT$Family,TT$OTU)
 
 
-GG<-ggplot(TT,aes(y=Abundance/Seq.tot,x=pop))+geom_boxplot(outlier.shape = NA)+geom_jitter()+facet_wrap(~new,scales = "free")
+GG<-ggplot(TT,aes(y=Abundance/Seq.tot,x=altitude))+geom_boxplot(outlier.shape = NA)+geom_jitter()+facet_wrap(~new,scales = "free")
 
-GG$data$pop<- as.character(GG$data$pop)
-GG$data$pop<-factor(x = GG$data$pop, levels = unique(GG$data$pop[order(as.character(GG$data$alt2))]))
+GG$data$altitude<- as.character(GG$data$altitude)
+GG$data$altitude<-factor(x = GG$data$altitude, levels = unique(GG$data$altitude[order(as.character(GG$data$alt2))]))
 
 GG+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+###############DESeq2 with random effect 
+rm(list = ls())
+
+load("D:/Rwd/phyloseq_fin/PS2_cor.R")
+#exclude "out" samples from dataset
+'%!in%' <- function(x,y)!('%in%'(x,y))
+PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #exclude out samples
+
+phyloseq_2_GG<-function(which.taxa,which.phyloseq,manage.ussigned=NULL,unassign.string=NULL){  
+  RESULT<-data.frame(stringsAsFactors = F)
+  subset_phylos<-prune_taxa(taxa_names(which.phyloseq)%in%which.taxa,which.phyloseq)
+  SSUMS<-sample_sums(which.phyloseq)
+  for(i in 1: length(which.taxa))
+  {
+    actual.phylos<-prune_taxa(taxa_names(which.phyloseq)%in%which.taxa[i],which.phyloseq)
+    Abundance<-as.numeric(otu_table(actual.phylos))  
+    OTU<-rep(which.taxa[i],length(Abundance))
+    Seq.tot<-rep(SSUMS[i],length(Abundance))
+    Seq.tot<-SSUMS
+    Taxo.actual<-as.character(tax_table(actual.phylos))
+    if(manage.ussigned==T){
+      for(j in 2: length(Taxo.actual)){
+        if(is.na(Taxo.actual[j])){Taxo.actual[j]<-ifelse(regexpr(unassign.string,Taxo.actual[j-1])>0,
+                                                         Taxo.actual[j-1],paste(Taxo.actual[j-1],unassign.string,sep=""))}
+      }
+    }
+    
+    Taxo.actual.rbind<-do.call("rbind", replicate(length(sample_sums(actual.phylos)), Taxo.actual, simplify = FALSE))
+    colnames(Taxo.actual.rbind)<-colnames(tax_table(which.phyloseq))
+    Sd<-sample_data(actual.phylos)
+    TEMP<-data.frame(Abundance,OTU,Seq.tot,Taxo.actual.rbind,Sd,stringsAsFactors = F)
+    RESULT<-rbind(RESULT,TEMP)
+  }
+  RESULT
+}
+
+
+TEST.neg_binom<-function(MIN.ABU,MIN.PREV,FORMULA,FORMULA.red,DATA,REPEATABLITY=FALSE,
+                         LR_test,POSTHOC=T,POSTHOC.target){
+ 
+  ######sample sums#############
+  sample_data(DATA)$SSUM<-sample_sums(DATA)
+ 
+  #####Filtering################
+  F.abu<-taxa_sums(DATA)>MIN.ABU
+  DATA.PresAbs<-transform_sample_counts(DATA,function(x) ifelse(x>0,1,0))
+  F.prev<-taxa_sums(DATA.PresAbs)/nsamples(DATA.PresAbs)>MIN.PREV
+  FILTER<-F.abu*F.prev==1
+  NTAX<-sum(FILTER)
+  print(paste(NTAX,"passed filtering steps"))
+  DATA.subset<-prune_taxa(FILTER,DATA)      
+  PROP.KEEPED.ASV<-(ntaxa(DATA.subset)/ntaxa(DATA))*100   
+  PROP.KEEPED.reads<-(sum(otu_table(DATA.subset))/sum(otu_table(DATA)))*100
+  print(paste("The subset has",PROP.KEEPED.ASV,"% of taxa and",PROP.KEEPED.reads,"% of reads of the original dataset"))
+ 
+  FORMULA.mod<-as.formula(paste("ACT",FORMULA))
+  FORMULA.red.mod<-as.formula(paste("ACT",FORMULA.red))
+ 
+  ANOVA.list<-list()
+  COEF.list<-list()
+  RSQ.list<-list()
+  POSTHOC.list<-list()
+ 
+  for(i in 1:ntaxa(DATA.subset)){
+    SD<-sample_data(DATA.subset)
+    class(SD)<-"data.frame"
+    
+    if(taxa_are_rows(DATA.subset)==F){SD$ACT<-as.numeric(otu_table(DATA.subset)[,i])}
+    if(taxa_are_rows(DATA.subset)==T){SD$ACT<-as.numeric(t(otu_table(DATA.subset))[,i])}    
+    
+    MODEL<-glmmTMB(formula = FORMULA.mod,offset = log(SSUM),
+                   data = SD,family = nbinom2,
+                   control=glmmTMBControl(optimizer=optim,
+                                          optArgs=list(method="BFGS")))
+    COEF.list[[i]]<-summary(MODEL)$coefficients$cond  
+    
+    if(LR_test==TRUE){
+      MODEL.red<-glmmTMB(formula = FORMULA.red.mod,offset = log(SSUM),
+                         data = SD,family = nbinom2,
+                         control=glmmTMBControl(optimizer=optim,
+                                                optArgs=list(method="BFGS")))
+      ANOVA.list[[i]]<-anova(MODEL,MODEL.red)[2,]
+    }
+    
+    #posthoc testing
+    if(POSTHOC==TRUE){
+      FML<-as.formula(paste("pairwise ~",POSTHOC.target))
+      mod_means_contr <- emmeans::emmeans(object = MODEL,
+                                          FML,
+                                          adjust = "tukey")
+      
+      mod_means <- multcomp::cld(object = mod_means_contr$emmeans,
+                                 Letters = letters)
+      Group<-mod_means$.group
+      names(Group)<-mod_means$Interval
+      POSTHOC.list[[i]]<-Group
+    }
+    
+    # if(REPEATABLITY==T){
+    #   icc(MODEL, ci=T,iterations = 100,robust = TRUE)
+    #   r2(MODEL, by_group = TRUE)
+    # }
+  }
+ 
+  #get results
+  LR.res<-do.call("rbind",ANOVA.list)
+  COEF.res<-do.call("rbind",COEF.list)
+  if(POSTHOC==TRUE){POSTHOC.res<-do.call("rbind",POSTHOC.list)
+  POSTHOC.res<-data.frame(OTU=taxa_names(DATA.subset),
+                          tax_table(DATA.subset),
+                          POSTHOC.res)
+  XXX<-length(names(POSTHOC.res))
+  LENGTH<-length(as.character(mod_means[,1]))-1
+  names(POSTHOC.res)[(XXX-LENGTH):XXX]<-as.character(mod_means[,1])}
+ 
+  if(POSTHOC==FALSE){POSTHOC.res<-NULL}  
+  #add taxomomy and otu
+  LR.res<-data.frame(OTU=taxa_names(DATA.subset),
+                     tax_table(DATA.subset),
+                     LR.res)
+ 
+  COEF.res<-data.frame(OTU=rep(taxa_names(DATA.subset),each=dim(COEF.list[[i]])[1]),
+                       COEF.res)
+ 
+  #fdr
+  LR.res$fdr<-p.adjust(LR.res$Pr..Chisq.,method = "fdr")
+ 
+  #results
+  list(LR.res=LR.res,COEF.res=COEF.res,POSTHOC.res=POSTHOC.res)
+}
+
+
+
+
+# PRED_categ<-function(OTUS,FORMULA,DATA,
+#                      POSTHOC=TRUE,POSTHOC.target,RAW.data=TRUE){
+#   ######sample sums#############
+#   sample_data(DATA)$SSUM<-sample_sums(DATA)
+#   
+#   #####Filtering################
+#   F.abu<-taxa_names(DATA)%in%OTUS
+#   DATA.subset<-prune_taxa(F.abu,DATA)      
+#   
+#   FORMULA.mod<-as.formula(paste("ACT",FORMULA))
+#   #FORMULA.red.mod<-as.formula(paste("ACT",FORMULA.red))
+#   
+#   PRED.list<-list()
+#   POSTHOC.list<-list()
+#   #fitting model
+#   for(i in 1:length(OTUS)){
+#     ACT<-OTUS[i]
+#     SD<-sample_data(DATA.subset)
+#     class(SD)<-"data.frame"
+#     
+#     SINGLE<-prune_taxa(ACT,DATA.subset)
+#     
+#     SD$ACT<-as.numeric(otu_table(SINGLE))
+#     SD$OTU<-ACT
+#     MODEL<-glmmTMB(formula = FORMULA.mod,offset = log(SSUM),
+#                    data = SD,family = nbinom2,
+#                    control=glmmTMBControl(optimizer=optim,
+#                                           optArgs=list(method="BFGS")))
+#     
+#     PRED<-ggeffects::ggpredict(MODEL,terms=POSTHOC.target,ci.lvl = 0.95,interval = "confidence")
+#     data.frame(PRED)
+#     PRED$OTU<-ACT
+#     PRED<-data.frame(PRED,tax_table(SINGLE))
+#     PRED.list[[i]]<-PRED
+#     
+#     #posthoc testing
+#     if(POSTHOC==TRUE){
+#       FML<-as.formula(paste("pairwise ~",POSTHOC.target))
+#       mod_means_contr <- emmeans::emmeans(object = MODEL,
+#                                           FML,
+#                                           adjust = "tukey")
+#       
+#       mod_means <- multcomp::cld(object = mod_means_contr$emmeans,
+#                                  Letters = letters)
+#       Group<-mod_means$.group
+#       names(Group)<-mod_means$Interval
+#       Group.l<-data.frame(Group,tax_table(SINGLE))
+#       Group.l$OTU<-ACT
+#       Group.l[,POSTHOC.target]<-rownames(Group.l)
+#       POSTHOC.list[[i]]<-Group.l
+#     }
+#   }  
+#   if(RAW.data==TRUE){RAW_DF<-phyloseq_2_GG(which.taxa=OTUS,
+#                                            which.phyloseq=DATA,
+#                                            manage.ussigned=T,unassign.string="")}  
+#   if(RAW.data==FALSE){RAW_DF<-NULL}  
+#   
+#   PRED.df<-do.call("rbind",PRED.list)    
+#   
+#   if(POSTHOC==TRUE){POSTHOC.res<-do.call("rbind",POSTHOC.list)}
+#   if(POSTHOC==FALSE){POSTHOC.res<-NULL}    
+#   
+#   RES.list<-list(PRED.df,POSTHOC.res,RAW_DF)  
+#   names(RES.list)<-c("PRED.df","POSTHOC","RAW.data")    
+#   RES.list
+#   
+# }    
+
+
+
+RESULTS<-TEST.neg_binom(MIN.ABU=2,MIN.PREV=0,FORMULA="~altitude+(1|pop)",
+                        FORMULA.red="~1+(1|pop)",DATA=PS2_cor,
+                        REPEATABLITY=FALSE,LR_test=TRUE,POSTHOC=TRUE,POSTHOC.target="altitude")
+
+
+# hist(RESULTS$LR.res$Pr..Chisq.)
+
+#significant according to LR tests
+hist(RESULTS$LR.res$Pr..Chisq.)
+SIG<-RESULTS$LR.res$fdr<0.1&!is.na(RESULTS$LR.res$fdr)
+TUK.df<-RESULTS$POSTHOC.res[SIG,]
+#significant according to TUK
+SIG2<-apply(TUK.df[,(dim(TUK.df)[2]-3):dim(TUK.df)[2]],1,function(x) length(unique(x))>1)
+TUK.df<-TUK.df[SIG2==T,]
+
+TUK.df
+
+SELECT<-rownames(TUK.df)
+rownames(TUK.df)<-NULL
+PS2_cor.tr<-transform_sample_counts(PS2_cor, function(x) x/sum(x))
+DDD<-phyloseq_2_GG(which.taxa=SELECT,which.phyloseq=PS2_cor,manage.ussigned=T,unassign.string="")
+p=ggplot(data = DDD,aes(x=altitude,y=Abundance))+geom_boxplot(outlier.shape = NA)+geom_jitter()+facet_grid(.~Genus)
+
+p$data$altitude<- as.character(p$data$altitude)
+p$data$altitude<-factor(x = p$data$altitude, levels = unique(p$data$altitude[order(as.character(p$data$alt2))]))
+
+p
+
 
 ```
 
@@ -1154,8 +1328,8 @@ p=plot_bar(PS_year, fill = "Phylum") +
 
 # 2- beta diversity
 
-random_tree = rtree(ntaxa(PS2_cor), rooted=TRUE, tip.label=taxa_names(PS2_cor))
-PS2_cor = merge_phyloseq(PS2_cor, random_tree)
+random_tree = rtree(ntaxa(PS_year), rooted=TRUE, tip.label=taxa_names(PS_year))
+PS_year = merge_phyloseq(PS_year, random_tree)
 
 ## 3- Beta Diversity: Plot the PCoA using Bray-Curtis distance: YEAR
 
@@ -1201,8 +1375,10 @@ PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor)
 RICH<-estimate_richness(PHYLOSEQ2.rare)
 RICH<-data.frame(RICH,sample_data(PHYLOSEQ2.rare))
 
-model_mass<-glmmTMB(Shannon~weight+(1|pop),data=RICH)
+model_null=glmmTMB(Shannon~1+(1|altitude+pop),data=RICH) 
+model_mass<-glmmTMB(Shannon~weight+(1|altitude+pop),data=RICH)
 summary(model_mass) # p=0.5 NS
+
 
 # 7- effect of sex
 
@@ -1425,20 +1601,21 @@ fviz_pca_ind(ifpca.x, repel=T, habillage=gstr$pop, addEllipses = T, col=funky(3)
 rm(list = ls())
 library(related)
 
-ALL=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/ALL_related.txt")
-ERG=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/eregli2.txt")
-DAR=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/darbogaz2.txt")
-KAR=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/karagol2.txt")
-KIZ=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/kiziltepe2.txt")
-MAD=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/madenkoy2.txt")
-ULU=readgenotypedata("D:/MolSys/2021 Microsats/2ndrun (1)/related/ulukisla2.txt")
+ALL=readgenotypedata("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/2ndrun/related/ALL_related.txt")
+ERG=readgenotypedata("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/2ndrun/related/eregli2.txt")
+DAR=readgenotypedata("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/2ndrun/related/darbogaz2.txt")
+KAR=readgenotypedata("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/2ndrun/related/karagol2.txt")
+KIZ=readgenotypedata("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/2ndrun/related/kiziltepe2.txt")
+MAD=readgenotypedata("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/2ndrun/related/madenkoy2.txt")
+ULU=readgenotypedata("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/2ndrun/related/ulukisla2.txt")
 
 #coancestry function causes to collapse R studio in my system. So, I did it with other pc and imported the results
 
 #Import the results of coancestry 
 
+#XX_co = coancestry(ALL$gdata, lynchrd=2, wang=2)
 #XX_co = coancestry(data, lynchrd=2, wang=2)
-#XX_sim=familysim(data$freqs,100)
+#XX_sim=familysim(data$freqs,100) #make 400 simulated pairs (100 PO, 100 FS, 100 HS and 100 UR)
 #XX_sim_co=coancestry(data, lynchrd=2, wang=2)
 
 load("D:/Rwd/msat/Alexey Outfiles/Dr_co")
@@ -1456,10 +1633,140 @@ load("D:/Rwd/msat/Alexey Outfiles/Kz_sim_co")
 load("D:/Rwd/msat/Alexey Outfiles/Md_co")
 load("D:/Rwd/msat/Alexey Outfiles/Md_sim_co")
 
-
 load("D:/Rwd/msat/Alexey Outfiles/Ul_co")
 load("D:/Rwd/msat/Alexey Outfiles/Ul_sim_co")
 
+#Use family simulation to get thresholds on the histogram to analyse real data
+#average relatedness The Lynch&Ritland's estimate is [,8] (Lynch M, Ritland K (1999) Estimation of pairwise relatedness with molecular markers. Genetics 152: 1753-1766.)
+
+#############################################################Ulukisla
+mean(Ul_sim_co[1:100,8]) #parent offspring
+#[1] 0.473225
+mean(Ul_sim_co[101:200,8]) #full sbling
+#[1] 0.483666
+mean(Ul_sim_co[201:300,8]) #half sbling
+#[1] 0.26428
+mean(Ul_sim_co[301:400,8]) #not related
+#[1] -0.018269
+
+dt_hist=data.frame(Ul_co$relatedness[,8])
+threshs=c(0.473225,0.483666,0.26428,-0.018269)
+threshs=as.data.frame(threshs)
+colnames(threshs)="tr"
+colnames(dt_hist)="Relatedness_estimate"
+ggplot(dt_hist,aes(x=Relatedness_estimate))+geom_histogram()+geom_vline(data=threshs,aes(xintercept=tr),color=c("red", "#E69F00", "#56B4E9","green"),linetype="dashed")
+
+#only 2 combinations between green and blue lines = between not related and half sbling
+
+
+#############################################################Eregli
+mean(Er_sim_co[1:100,8]) #parent offspring
+#[1] 0.523139
+mean(Er_sim_co[101:200,8]) #full sibling
+#[1] 0.487746
+mean(Er_sim_co[201:300,8]) #half sibling
+#[1] 0.244478
+mean(Er_sim_co[301:400,8]) #not related
+#[1] -0.016541
+
+dt_hist=data.frame(Er_co$relatedness[,8])
+threshs=c(0.523139,0.487746,0.244478,-0.016541)
+threshs=as.data.frame(threshs)
+colnames(threshs)="tr"
+colnames(dt_hist)="Relatedness_estimate"
+ggplot(dt_hist,aes(x=Relatedness_estimate))+geom_histogram()+geom_vline(data=threshs,aes(xintercept=tr),color=c("red", "#E69F00", "#56B4E9","green"),linetype="dashed")
+
+#8 parent-offspring
+
+############################################################# Darbogaz
+mean(Dr_sim_co[1:100,8]) #parent offspring
+#[1] 0.519536
+mean(Dr_sim_co[101:200,8]) #full sibling
+#[1] 0.502967
+mean(Dr_sim_co[201:300,8]) #half sibling
+#[1] 0.244478
+mean(Dr_sim_co[301:400,8]) #not related
+#[1] -0.01087
+
+dt_hist=data.frame(Dr_co$relatedness[,8])
+threshs=c(0.523139,0.487746,0.291925,-0.016541)
+threshs=as.data.frame(threshs)
+colnames(threshs)="tr"
+colnames(dt_hist)="Relatedness_estimate"
+ggplot(dt_hist,aes(x=Relatedness_estimate))+geom_histogram()+geom_vline(data=threshs,aes(xintercept=tr),color=c("red", "#E69F00", "#56B4E9","green"),linetype="dashed")
+
+# 2 parent-offspring 4 full sbling, 4 half sbling
+
+############################################################# madenkoy
+mean(Md_sim_co[1:100,8]) #parent offspring
+#[1] 0.508845
+mean(Md_sim_co[101:200,8]) #full sibling
+#[1] 0.525079
+mean(Md_sim_co[201:300,8]) #half sibling
+#[1] 0.265839
+mean(Md_sim_co[301:400,8]) #not related
+#[1] -0.009686
+
+dt_hist=data.frame(Md_co$relatedness[,8])
+threshs=c(0.508845,0.525079,0.265839,-0.009686)
+threshs=as.data.frame(threshs)
+colnames(threshs)="tr"
+colnames(dt_hist)="Relatedness_estimate"
+ggplot(dt_hist,aes(x=Relatedness_estimate))+geom_histogram()+geom_vline(data=threshs,aes(xintercept=tr),color=c("red", "#E69F00", "#56B4E9","green"),linetype="dashed")
+
+# only one half sibling
+
+############################################################# Karagol
+mean(Kr_sim_co[1:100,8]) #parent offspring
+#[1] 0.51682
+mean(Kr_sim_co[101:200,8]) #full sibling
+#[1] 0.488963
+mean(Kr_sim_co[201:300,8]) #half sibling
+#[1] 0.238835
+mean(Kr_sim_co[301:400,8]) #not related
+#[1] -0.036451
+
+dt_hist=data.frame(Kr_co$relatedness[,8])
+threshs=c(0.51682,0.488963,0.238835,-0.036451)
+threshs=as.data.frame(threshs)
+colnames(threshs)="tr"
+colnames(dt_hist)="Relatedness_estimate"
+ggplot(dt_hist,aes(x=Relatedness_estimate))+geom_histogram()+geom_vline(data=threshs,aes(xintercept=tr),color=c("red", "#E69F00", "#56B4E9","green"),linetype="dashed")
+
+#two parent-offspring, 4 full sibling, plenty half sibling
+
+############################################################# Kiziltepe
+mean(Kz_sim_co[1:100,8]) #parent offspring
+#[1] 0.518847
+mean(Kz_sim_co[101:200,8]) #full sibling
+#[1] 0.540133
+mean(Kz_sim_co[201:300,8]) #half sibling
+#[1] 0.196552
+mean(Kz_sim_co[301:400,8]) #not related
+#[1] -0.019793
+
+dt_hist=data.frame(Kr_co$relatedness[,8])
+threshs=c(0.518847,0.540133,0.196552,-0.019793)
+threshs=as.data.frame(threshs)
+colnames(threshs)="tr"
+colnames(dt_hist)="Relatedness_estimate"
+ggplot(dt_hist,aes(x=Relatedness_estimate))+geom_histogram()+geom_vline(data=threshs,aes(xintercept=tr),color=c("red", "#E69F00", "#56B4E9","green"),linetype="dashed")
+
+#two parent-offspring, 6 full sibling, plenty half sibling
+################################################################################################
+#Import the dataset with just location names to Calculate average within-group relatedness and compare to expected values.
+
+ALLpop=readgenotypedata("D:/MolSys/Nannospalax Microsatellite/2021 Microsats/2ndrun/related/ALL_related_pop.txt")
+grouprel(ALLpop$gdata, estimatorname = "lynchli", usedgroups = "all", iterations = 100)
+
+
+
+
+
+#CONTINUE HERE ALEXEY RELATED 
+
+
+################################################################################################
 
 write.table(Er_co$relatedness, file = "D:/Rwd/msat/relatedness tables/ERG.csv")
 write.table(Ul_co$relatedness, file = "D:/Rwd/msat/relatedness tables/ULU.csv")
@@ -1594,3 +1901,461 @@ cor.test(ad$relatedness, ad$p.values) #p=0.722 and correlation is 0.18
 
 ```
 
+*16 - Hormones and microbiome*
+```{r warning=F, message=F}
+rm(list = ls())
+
+hor=read.csv("D:/MolSys/Assays/Tyroid/hormones_log_HMS.csv")
+hor$ID=c("K01","K02"  ,"K03" , "K04" , "K05" , "K06" , "K07",  "A02" , "A03"  ,"A04" , "A05" , "A06"  ,"A07" , "A08" , "A09" , "A10" ,"U01" ,  "U02" ,  "U03"  , "U04" ,  "U05" ,  "E9-1" ,"E9-2", "E9-3", "E9-4")
+
+length(hor$ID) #25 samples
+
+length(sample_names(PS2_cor)) #51 samples
+
+PS_hor=subset_samples(PS2_cor, sample_ID %in% hor$ID==T)
+
+table=as.data.frame(sample_data(PS_hor))
+#write.csv(table, file = "D:/MolSys/table.txt") #manually add the hormone data
+
+met=read.delim("D:/MolSys/table.txt")
+met=sample_data(met)
+sample_names(met)=met$sample_ID
+
+sample_data(PS_hor)=met #23 samples
+colnames(sample_data(PS_hor))
+#"FT4_ngmL"    "FT3_ngmL"    "TT4_ngmL"    "TT3_ngmL"    "FT4_FT3"     "TT4_TT3"     "FT4_TT4"     "FT3_TT3"
+
+save(PS_hor, file="D:/Rwd/phyloseq_fin/PS_hor.R")
+
+#Virsualise and analyse hormon data vs altitude
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/PS_hor.R")
+met=read.delim("D:/MolSys/table.txt")
+
+library(ggplot2)
+library(ggpubr)
+library(forcats)
+
+sample_data(PS_hor)$altitude <- factor(sample_data(PS_hor)$altitude , levels=c("low", "middle", "high"))
+
+p=ggplot(sample_data(PS_hor), aes(x=altitude, y=FT4ngdL))+geom_boxplot() 
+
+comp=list(c("low","middle"),c("middle","high"),c("low","high"))
+symnum.args=list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
+
+p+stat_compare_means(method = "wilcox.test", comparisons = comp, label = "p.signif", symnum.args = symnum.args)
+
+##############################
+colnames(sample_data(PS_hor))
+#"FT4_ngmL"    "FT3_ngmL"    "TT4_ngmL"    "TT3_ngmL"    "FT4_FT3"     "TT4_TT3"     "FT4_TT4"     "FT3_TT3"
+
+
+###########################Automated Model Selection
+library(glmulti)
+
+hor=read.csv("D:/MolSys/Assays/Tyroid/hormones_log_HMS.csv")
+
+mod.glmulti=function(formula, data, ...)  {
+  lm(formula, data=data)
+}
+
+res <- glmulti(FT4_ngmL~altitude+pop+sex+weight, data = hor,
+               level=1, # 1 = models with main effects only
+               fitfunction=mod.glmulti, #our function is a linear model (lm)
+               crit="aicc", #AIC corrected for small sample size
+               method="h", #"h" for exhaustive screening of the candidates
+               maxsize=2) # maximal number of TERMS to be included in candidate models
+
+# summary of results
+print(res) # 2 models within 2 IC units. 7 models to reach 95% of evidence weight.
+
+as.data.frame(weightable(res))
+
+#                          model      aicc    weights
+#1  FT4_ngmL ~ 1 + altitude + weight -8.774416 0.25924903
+#2                FT4_ngmL ~ 1 + sex -8.341068 0.20874538
+#3     FT4_ngmL ~ 1 + altitude + sex -7.408999 0.13098470
+#4                      FT4_ngmL ~ 1 -7.372606 0.12862283
+#5             FT4_ngmL ~ 1 + weight -6.794280 0.09632435
+#6           FT4_ngmL ~ 1 + altitude -6.251822 0.07344173
+#7       FT4_ngmL ~ 1 + pop + weight -4.618822 0.03245946
+#8       FT4_ngmL ~ 1 + sex + weight -3.724113 0.02075190
+#9          FT4_ngmL ~ 1 + pop + sex -3.445036 0.01804916
+#10    FT4_ngmL ~ 1 + altitude + pop -3.164340 0.01568573
+#11               FT4_ngmL ~ 1 + pop -3.164340 0.01568573
+
+# plot of AICc values for all models
+plot(res) 
+plot(res, type="s")
+
+# examine the "best" model
+summary(res@objects[[1]])  # "best" model is FT4_ngmL ~ 1 + altitude + weight  p=0.0591
+
+# examine the second "best" model
+summary(res@objects[[2]])  # "second best" model FT4_ngmL ~ 1 + sex but NS 
+
+# examine the third "best" model
+summary(res@objects[[2]])  # "third best" model FT4_ngmL ~ 1 + altitude + sex but NS 
+
+# check distribution of residuals
+plot(res@objects[[1]])
+
+###ALL NOT SIGNIFICANT
+
+###########################MANUAL Model Selection
+hor=na.omit(hor)
+
+model1 = lm(FT4_ngmL~1,hor)
+model2=lm(FT4_ngmL~altitude + pop + sex+ weight,hor)
+model3=lm(FT4_ngmL~altitude + pop + sex,hor)
+model4=lm(FT4_ngmL~altitude + pop + weight,hor)
+model5=lm(FT4_ngmL~altitude + pop,hor)
+model6=lm(FT4_ngmL~altitude,hor)
+model7=lm(FT4_ngmL~pop,hor)
+model8=lm(FT4_ngmL~sex,hor)
+model9=lm(FT4_ngmL~weight,hor)
+
+anova(model1,model2,model3,model4,model5,model6,model7, model8, model9)
+
+#all not significant
+
+#################ANOVA ALTITUDE ###################
+summary(aov(FT4_ngmL ~ altitude, data = hor))#NS
+summary(aov(FT3_ngmL ~ altitude, data = hor))#NS
+summary(aov(TT4_ngmL ~ altitude, data = hor))#NS
+summary(aov(TT3_ngmL ~ altitude, data = hor))#NS
+summary(aov(FT4_FT3 ~ altitude, data = hor))#NS
+summary(aov(TT4_TT3 ~ altitude, data = hor))#NS
+summary(aov(FT4_TT4 ~ altitude, data = hor)) ##significant F value 3.863 Pr 0.0428   DF 2
+summary(aov(FT3_TT3 ~ altitude, data = hor)) #NS
+
+
+
+#########ALPHA DIVERSITY TT4_ngmL significant, TT4_TT3 significant, FT4_TT4 marginally insignificant
+PS_hor<-rarefy_even_depth(PS_hor)
+RICH=estimate_richness(PS_hor)
+
+RICH <- cbind(sample_data(PS_hor), RICH)
+
+#ANOVA
+summary(aov(RICH$Observed ~ FT4_ngmL, data = RICH)) #NS
+summary(aov(RICH$Shannon ~ FT4_ngmL, data = RICH)) # NS
+summary(aov(RICH$Simpson ~ FT4_ngmL, data = RICH)) # NS
+
+summary(aov(RICH$Observed ~ TT4_ngmL , data = RICH)) #NS
+summary(aov(RICH$Shannon ~ TT4_ngmL, data = RICH)) # 0.0555
+summary(aov(RICH$Simpson ~ TT4_ngmL, data = RICH)) # 0.0145
+
+summary(aov(RICH$Observed ~ TT4_TT3 , data = RICH)) #NS 
+summary(aov(RICH$Shannon ~ TT4_TT3, data = RICH)) # 0.0642
+summary(aov(RICH$Simpson ~ TT4_TT3, data = RICH)) # NS 0.0714
+
+summary(aov(RICH$Observed ~ FT4_TT4 , data = RICH)) #NS 
+summary(aov(RICH$Shannon ~ FT4_TT4, data = RICH)) # 0.0379
+summary(aov(RICH$Simpson ~ FT4_TT4, data = RICH)) # 0.0233 
+
+
+##ALPHA DIVERSITY GLMM
+colnames(sample_data(PS_hor))
+#"FT4_ngmL"    "FT3_ngmL"    "TT4_ngmL"    "TT3_ngmL"    "FT4_FT3"     "TT4_TT3"     "FT4_TT4"     "FT3_TT3"
+
+#1. fitting models
+RICH=na.omit(RICH)
+
+#Observed
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~FT4_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~FT3_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~TT4_ngmL+(1|pop),na.action = na.omit, data=RICH) #significant middle
+anova(model_null,model_cat) #0.092
+
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~TT3_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~FT4_FT3+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~TT4_TT3+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~FT4_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~FT4_TT4+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Observed~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Observed~FT3_TT3+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+#Shannon
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Shannon~FT4_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Shannon~FT3_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Shannon~TT4_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #0.02117 
+
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Shannon~TT3_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Shannon~FT4_FT3+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Shannon~TT4_TT3+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #0.05719 
+
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Shannon~FT4_TT4+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #0.06216 
+
+model_null<-glmmTMB(Shannon~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Shannon~FT3_TT3+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+#Simpson
+model_null<-glmmTMB(Simpson~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Simpson~FT4_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Simpson~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Simpson~FT3_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Simpson~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Simpson~TT4_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #0.01432 
+
+model_null<-glmmTMB(Simpson~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Simpson~TT3_ngmL+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Simpson~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Simpson~FT4_FT3+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Simpson~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Simpson~TT4_TT3+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #0.07327 
+
+
+model_null<-glmmTMB(Simpson~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Simpson~FT4_TT4+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #0.03508 
+
+model_null<-glmmTMB(Simpson~1+(1|pop),data=RICH) #null model
+model_cat<-glmmTMB(Simpson~FT3_TT3+(1|pop),data=RICH) #significant middle
+anova(model_null,model_cat) #NS
+
+#########DA.TEST
+#DA.test package
+library(DAtest)
+library(phylosmith)
+
+total = median(sample_sums(PS_hor))
+standf = function(x, t=total) round(t * (x / sum(x)))
+
+PS_fam <- conglomerate_taxa(PS_hor, "Family")
+PS_fam = transform_sample_counts(PS_fam, standf)
+
+colnames(sample_data(PS_hor))
+#"FT4_ngmL"    "FT3_ngmL"    "TT4_ngmL"    "TT3_ngmL"    "FT4_FT3"     "TT4_TT3"     "FT4_TT4"     "FT3_TT3"
+
+
+res <- DA.kru(data = PS_hor, predictor = "FT4_ngmL", relative = TRUE, p.adj = "fdr")
+sort(res$pval)[1] #NS
+
+res <- DA.kru(data = PS_hor, predictor = "FT3_ngmL", relative = TRUE, p.adj = "fdr")
+sort(res$pval)[1] #NS
+
+res <- DA.kru(data = PS_hor, predictor = "TT4_ngmL", relative = TRUE, p.adj = "fdr")
+sort(res$pval)[1]#NS
+
+res <- DA.kru(data = PS_hor, predictor = "TT3_ngmL", relative = TRUE, p.adj = "fdr")
+sort(res$pval)[1]#NS
+
+res <- DA.kru(data = PS_hor, predictor = "FT4_FT3", relative = TRUE, p.adj = "fdr")
+sort(res$pval)[1] #NS
+
+res <- DA.kru(data = PS_hor, predictor = "TT4_TT3", relative = TRUE, p.adj = "fdr")
+sort(res$pval)[1] #NS
+
+res <- DA.kru(data = PS_hor, predictor = "FT4_TT4", relative = TRUE, p.adj = "fdr")
+sort(res$pval)[1]
+
+res <- DA.kru(data = PS_hor, predictor = "FT3_TT3", relative = TRUE, p.adj = "fdr")
+sort(res$pval)[1] #NS
+
+########Beta diversity adonis only FT4_TT4 significant
+bray_dist= phyloseq::distance(PS_hor, method="bray", weighted=F)
+colnames(sample_data(PS_hor))
+#"FT4_ngmL"    "FT3_ngmL"    "TT4_ngmL"    "TT3_ngmL"    "FT4_FT3"     "TT4_TT3"     "FT4_TT4"     "FT3_TT3"
+
+
+adonis2(bray_dist ~ sample_data(PS_hor)$FT4_ngmL, na.action = na.omit)##NS
+adonis2(bray_dist ~ sample_data(PS_hor)$FT3_ngmL)                      ##NS
+adonis2(bray_dist ~ sample_data(PS_hor)$TT4_ngmL, na.action = na.omit) #NS
+adonis2(bray_dist ~ sample_data(PS_hor)$TT3_ngmL, na.action = na.omit) #NS
+adonis2(bray_dist ~ sample_data(PS_hor)$FT4_FT3, na.action = na.omit)  #NS
+adonis2(bray_dist ~ sample_data(PS_hor)$TT4_TT3, na.action = na.omit)  #NS
+adonis2(bray_dist ~ sample_data(PS_hor)$FT4_TT4, na.action = na.omit)  ##0.008 
+adonis2(bray_dist ~ sample_data(PS_hor)$FT3_TT3, na.action = na.omit)  #NS
+
+####check the correlation direction
+# Load necessary libraries
+library(vegan)
+
+# Convert Bray-Curtis dissimilarity matrix to a vector
+bray_vector <- as.vector(as.matrix(bray_dist))
+
+# Extract the numeric column
+numeric_column <- sample_data(PS_hor)$FT4_TT4
+
+# Create a distance matrix from the numeric column
+numeric_dist_matrix <- as.matrix(dist(numeric_column))
+
+# Perform Mantel test
+mantel_test <- mantel(bray_dist, numeric_dist_matrix, method = "pearson") #r: 0.1849 
+####
+
+
+
+#MDMR ALL NS
+#remove samples with NA
+'%!in%' <- function(x,y)!('%in%'(x,y))
+PS_hor= subset_samples(PS_hor, sample_ID %!in% c("K01", "K06", "E9-4")==T)
+
+PHYLOSEQ2.rare<-rarefy_even_depth(PS_hor)
+PHYLOSEQ2.trans<-transform_sample_counts(PHYLOSEQ2.rare,function(x) x/sum(x))
+DIST<-vegdist(otu_table(PHYLOSEQ2.trans))
+ORD<-ordinate(PHYLOSEQ2.trans,method="PCoA",distance = DIST)
+ORD_df<-plot_ordination(PHYLOSEQ2.trans,ORD,justDF = T)
+
+colnames(sample_data(PS_hor))
+#"FT4_ngmL"    "FT3_ngmL"    "TT4_ngmL"    "TT3_ngmL"    "FT4_FT3"     "TT4_TT3"     "FT4_TT4"     "FT3_TT3"
+
+mdmr.res <- MDMR::mixed.mdmr(~FT4_ngmL+(1|pop),data =ORD_df,D = DIST)
+summary(mdmr.res) #NS
+
+mdmr.res <- MDMR::mixed.mdmr(~FT3_ngmL+(1|pop),data =ORD_df,D = DIST)
+summary(mdmr.res) #NS
+
+mdmr.res <- MDMR::mixed.mdmr(~TT4_ngmL+(1|pop),data =ORD_df,D = DIST)
+summary(mdmr.res) #NS
+
+mdmr.res <- MDMR::mixed.mdmr(~TT3_ngmL+(1|pop),data =ORD_df,D = DIST)
+summary(mdmr.res) #NS
+
+mdmr.res <- MDMR::mixed.mdmr(~FT4_FT3+(1|pop),data =ORD_df,D = DIST)
+summary(mdmr.res) #NS
+
+mdmr.res <- MDMR::mixed.mdmr(~TT4_TT3+(1|pop),data =ORD_df,D = DIST)
+summary(mdmr.res) #NS
+
+mdmr.res <- MDMR::mixed.mdmr(~FT4_TT4+(1|pop),data =ORD_df,D = DIST)
+summary(mdmr.res) #NS
+
+mdmr.res <- MDMR::mixed.mdmr(~FT3_TT3+(1|pop),data =ORD_df,D = DIST)
+summary(mdmr.res) #NS
+
+#Regression plot
+A1=ggplot(ORD_df, aes(x=Axis.1, y=FT3_ngmL)) + 
+  geom_point()+
+  geom_smooth(method=lm) +geom_label(label=rownames(ORD_df))
+
+A2=ggplot(ORD_df, aes(x=Axis.2, y=FT3_ngmL)) + 
+  geom_point()+
+  geom_smooth(method=lm) +geom_label(label=rownames(ORD_df))
+
+
+#GLMM 
+colnames(sample_data(PS_hor))
+#"FT4_ngmL"    "FT3_ngmL"    "TT4_ngmL"    "TT3_ngmL"    "FT4_FT3"     "TT4_TT3"     "FT4_TT4"     "FT3_TT3"
+
+#axis 1
+model_null<-glmmTMB(Axis.1~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.1~FT4_ngmL+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.1~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.1~FT3_ngmL+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.1~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.1~TT4_ngmL+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.1~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.1~TT3_ngmL+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.1~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.1~FT4_FT3+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.1~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.1~TT4_TT3+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.1~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.1~FT4_TT4+(1|pop),data=ORD_df) #correlation -0.63
+anova(model_null,model_cat) #0.03505 
+
+model_null<-glmmTMB(Axis.1~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.1~FT3_TT3+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+#Axis 2
+
+model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.2~FT4_ngmL+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.2~FT3_ngmL+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.2~TT4_ngmL+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.2~TT3_ngmL+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.2~FT4_FT3+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.2~TT4_TT3+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.2~FT4_TT4+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.2~FT3_TT3+(1|pop),data=ORD_df)
+anova(model_null,model_cat) #NS
+
+```
