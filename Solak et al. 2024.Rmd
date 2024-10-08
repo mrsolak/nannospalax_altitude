@@ -725,17 +725,31 @@ load("D:/Rwd/phyloseq_fin/PS2_cor.R")
 random_tree = rtree(ntaxa(PS2_cor), rooted=TRUE, tip.label=taxa_names(PS2_cor)) #add a phylogenetic tree to phyloseq
 PS2_cor = merge_phyloseq(PS2_cor, random_tree) #merge the tree and phyloseq
 
-##Beta Diversity: Plot the PCoA using Bray-Curtis distance:
-bray_dist= phyloseq::distance(PS2_cor, method="bray", weighted=F)
-ordination = ordinate(PS2_cor, method="PCoA", distance="bray")
-p=plot_ordination(PS2_cor, ordination, color="altitude", shape = "pop") + theme(aspect.ratio=1)+ ggtitle("Beta Diversity. PCoA using the Bray-Curtis distance") + geom_point(size=5)+ theme(text = element_text(size = 20),legend.text=element_text(size=20))+theme_classic()
+# Step 1: Extract OTU/ASV table from phyloseq object
+otu_table <- as(otu_table(PS2_cor), "matrix")
 
-plot_ordination(PS2_cor, ordination, color="altitude", shape = "pop") + theme(aspect.ratio=1, legend.text = element_text(size = 12)) +geom_point(size=3) + scale_x_reverse() + scale_y_reverse() +  scale_shape_manual(values=c(0,4,21,3,15,17))
+# Step 2: Apply rrarefy function
+# Define the desired sample size (minimum sequencing depth)
+min_depth <- min(rowSums(otu_table)) # You can set this value manually if desired
+
+# Perform repeated subsampling
+rarefied_otu_table <- rrarefy(otu_table, min_depth)
+
+OTU=otu_table(rarefied_otu_table, taxa_are_rows=F)
+
+otu_table(PS2_cor)=OTU
+
+PHYLOSEQ2.rare=PS2_cor
+
+##Beta Diversity: Plot the PCoA using Bray-Curtis distance:
+bray_dist= phyloseq::distance(PHYLOSEQ2.rare, method="bray", weighted=F)
+ordination = ordinate(PHYLOSEQ2.rare, method="PCoA", distance="bray")
+p=plot_ordination(PHYLOSEQ2.rare, ordination, color="altitude", shape = "pop") + theme(aspect.ratio=1) + geom_point(size=5)+ theme(text = element_text(size = 20),legend.text=element_text(size=20))+theme_classic()
 
 
 ## PERMANOVA##
-adonis2(wunifrac_dist ~ sample_data(PS2_cor)$altitude) #significant
-adonis2(bray_dist ~ sample_data(PS2_cor)$altitude)     ##significant
+adonis2(wunifrac_dist ~ sample_data(PHYLOSEQ2.rare)$altitude) #significant
+adonis2(bray_dist ~ sample_data(PHYLOSEQ2.rare)$altitude)     ##significant
 
 
 ##________________________ Inter-individual divergence / spread ________##
@@ -796,7 +810,24 @@ sample_data(PS2_cor)$Alt_cont<-Alt_cont
 
 ############################################
 
-PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor) #Resample an OTU table such that all samples have the same library size
+#PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor) #Resample an OTU table such that all samples have the same library size
+#use rrarefy() function instead, below.
+
+# Step 1: Extract OTU/ASV table from phyloseq object
+otu_table <- as(otu_table(PS2_cor), "matrix")
+
+# Step 2: Apply rrarefy function
+# Define the desired sample size (minimum sequencing depth)
+min_depth <- min(rowSums(otu_table)) # You can set this value manually if desired
+
+# Perform repeated subsampling
+rarefied_otu_table <- rrarefy(otu_table, min_depth)
+
+OTU=otu_table(rarefied_otu_table, taxa_are_rows=F)
+
+otu_table(PS2_cor)=OTU
+
+PHYLOSEQ2.rare=PS2_cor
 
 # 1- Alpha Diversity modelling
 
@@ -832,10 +863,6 @@ summary(model_cat)
 #however there is no significant effect of altitude in alpha diversity.
 
 # 3- Beta Diversity GLMMs
-rm(list = ls())
-load("D:/Rwd/phyloseq_fin/PS2_cor.R")
-PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor)
-
 #Scores for first (two?) PCOA axes could be use a model response 
 
 PHYLOSEQ2.trans<-transform_sample_counts(PHYLOSEQ2.rare,function(x) x/sum(x))
@@ -846,8 +873,8 @@ plot_ordination(PHYLOSEQ2.trans,ORD,color="pop")
 ORD_df<-plot_ordination(PHYLOSEQ2.trans,ORD,justDF = T)
 
 #Use the PCoA axes as beta diversity model
-model_null<-glmmTMB(Axis.2~1+(1|pop),data=ORD_df) 
-model_cat<-glmmTMB(Axis.2~altitude+(1|pop),data=ORD_df)
+model_null<-glmmTMB(Axis.1~1+(1|pop),data=ORD_df) 
+model_cat<-glmmTMB(Axis.1~altitude+(1|pop),data=ORD_df)
 
 summary(model_cat)
 anova(model_null,model_cat) #cat model explains better than null p=0.01
@@ -1007,6 +1034,9 @@ PS_fam = transform_sample_counts(PS_fam, standf)
 
 res <- DA.kru(data = PS_fam, predictor = "altitude", relative = TRUE, p.adj = "fdr")
 write.table(res, file="D:/Rwd/16sFin/16sFin/tables/cor/comp_kru_fam.csv")
+
+
+
 
 ###############DESeq2  
 library(phyloseq)
@@ -1343,7 +1373,7 @@ adonis2(bray_dist ~ sample_data(PS2_cor)$year)     ##significant
 # 4- mixed models
 rm(list = ls())
 load("D:/Rwd/phyloseq_fin/PS2_cor.R")
-PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor)
+#PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor) use rrarefy instead
 
 #Scores for first (two?) PCOA axes could be use a model response instead of alpha diversity analyses
 
@@ -1370,7 +1400,7 @@ mdmr.res <- MDMR::mixed.mdmr(~year+
 summary(mdmr.res)
 
 #6- effect of body mass
-PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor)
+#PHYLOSEQ2.rare<-rarefy_even_depth(PS2_cor)
 
 RICH<-estimate_richness(PHYLOSEQ2.rare)
 RICH<-data.frame(RICH,sample_data(PHYLOSEQ2.rare))
@@ -2032,7 +2062,7 @@ summary(aov(FT3_TT3 ~ altitude, data = hor)) #NS
 
 
 #########ALPHA DIVERSITY TT4_ngmL significant, TT4_TT3 significant, FT4_TT4 marginally insignificant
-PS_hor<-rarefy_even_depth(PS_hor)
+#PS_hor<-rarefy_even_depth(PS_hor) use rrarefy instead
 RICH=estimate_richness(PS_hor)
 
 RICH <- cbind(sample_data(PS_hor), RICH)
@@ -2244,7 +2274,7 @@ mantel_test <- mantel(bray_dist, numeric_dist_matrix, method = "pearson") #r: 0.
 '%!in%' <- function(x,y)!('%in%'(x,y))
 PS_hor= subset_samples(PS_hor, sample_ID %!in% c("K01", "K06", "E9-4")==T)
 
-PHYLOSEQ2.rare<-rarefy_even_depth(PS_hor)
+#PHYLOSEQ2.rare<-rarefy_even_depth(PS_hor)  use rrarefy instead
 PHYLOSEQ2.trans<-transform_sample_counts(PHYLOSEQ2.rare,function(x) x/sum(x))
 DIST<-vegdist(otu_table(PHYLOSEQ2.trans))
 ORD<-ordinate(PHYLOSEQ2.trans,method="PCoA",distance = DIST)
