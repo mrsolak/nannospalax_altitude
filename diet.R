@@ -22,8 +22,7 @@ save(taxa, file="/home/hsolak/16s2/chimera_taxonomy_assign/taxa.R")
 ###check chordata blast them
 
 rm(list = ls())
-setwd("D:/Rwd/PhD18s")
-load("PHYLOSEQ_SD_DIET_RV_all_procisteny_TAXO_derep.R")
+load("D:/Rwd/PhD18s/PHYLOSEQ_SD_DIET_RV_all_procisteny_TAXO_derep.R")
 PHY=PHYLOSEQ_SD_DIET_RV_all_procisteny_TAXO_derep
 
 PS=prune_samples(sample_data(PHY)$Dataset=="Halil", PHY)
@@ -166,8 +165,6 @@ DF<-DF[order(DF$SSUMS),] #Order by sample sums, lowest 1k and highest 210k
 
 write.table(DF,"D:/Rwd/PhD18s/tables/2SSUMS_SUMMARY.txt",row.names = F,quote = F, sep="\t")
 
-
-
 #######################################################################################
 ############################# VIRSUALIZATION #################################################
 #######################################################################################
@@ -228,65 +225,21 @@ PS=PS_diet
 total = median(sample_sums(PS))
 standf = function(x, t=total) round(t * (x / sum(x)))
 
-###alt order barplot
-PS2_alt <- merge_samples(PS, "alt")
-PS2_alt = transform_sample_counts(PS2_alt, standf)
 
-#This palette is relatively fine, if you have < 25 colors:
-c25 <- c("gray70","green4", # red
-         "#E31A1C",
-         "#6A3D9A", # purple
-         "#FF7F00", # orange
-         "black","dodgerblue2",
-         "skyblue2","#FB9A99", # lt pink
-         "palegreen2",
-         "#CAB2D6", # lt purple
-         "#FDBF6F", # lt orange
-         "gold1", "khaki2",
-         "maroon","orchid1","deeppink1","blue1","steelblue4",
-         "darkturquoise","green1","yellow4","yellow3",
-         "darkorange4","brown")
-
-p3=plot_bar(PS2_alt, fill = "Order") + geom_bar(stat="identity", position="stack") +scale_fill_manual(values=c25)
-
-# Change order of X axis by altitude group
-p3=p3 + aes(x = fct_reorder(Sample, p3$data$alt2))
+#Family by pop
+PS_pop <- merge_samples(PS, "pop")
+PS_pop = transform_sample_counts(PS_pop, standf)
 
 
-######Bar Plot -- Phylum by Population
-PS2_pop <- merge_samples(PS, "pop")
-PS2_pop = transform_sample_counts(PS2_pop, standf)
-
-
-p4=plot_bar(PS2_pop, fill = "Order") + geom_bar(stat="identity", position="stack") +scale_fill_manual(values=c25)
-
-# Change order of X axis by altitude group
-library(forcats)
-p4=p4 + aes(x = fct_reorder(Sample, p4$data$alt2))
-
-#combine plots
-library(ggpubr)
-ggarrange(p3, p4, ncol=2, nrow=1, common.legend = TRUE, legend="bottom")
-
-
-
-
-PS = transform_sample_counts(PS, standf)
-
-#Genus by alt
-PS2 <- merge_samples(PS, "Dataset")
-PS2 = transform_sample_counts(PS2, standf)
-
-
-DF.genus<-prepare_tax_df(PHYLOSEQ=PS2,
-                                     RANK="Genus",Unass.symbol=NA,
+DF.family<-prepare_tax_df(PHYLOSEQ=PS_pop,
+                                     RANK="Family",Unass.symbol=NA,
                                      Unass.repl="Unassigned",min_prop=NULL,top_tax=9,
                                      bellow_top="Others",merge_categories=NULL,
                                      prop.trans=TRUE,sort_abu=TRUE)
 
 
-DF.genus$Genus<-gsub(" group","",DF.genus$Genus)
-ta3 = ggplot(DF.genus, aes_string(x = "Dataset", y = "Abundance", fill = "Genus",order="Genus"))+theme_bw(base_size = 12)
+DF.family$Family<-gsub(" group","",DF.family$Family)
+ta3 = ggplot(DF.family, aes_string(x = "pop", y = "Abundance", fill = "Family",order="Family"))+theme_bw(base_size = 12)
 ta3 = ta3 + geom_bar(stat = "identity", position = "stack")
 ta3= ta3 + theme(axis.title.x=element_blank(),axis.text.x = element_text(size = 7, angle = 90),axis.text.y = element_text(hjust = 0,size=10))
 
@@ -331,44 +284,51 @@ library(forcats)
 ta3 + aes(x = fct_reorder(Sample, ta3$data$alt2)) 
 
 #######################################################################################
-############################# TOP TAXA #################################################
+############################# barplots #################################################
 #######################################################################################
-#https://github.com/joey711/phyloseq/issues/494
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/diet/PS_diet_fin.R")
+PS=PS_diet
+rm(PS_diet)
+
+##Normalize number of reads in each sample using median sequencing depth.
+total = median(sample_sums(PS))
+standf = function(x, t=total) round(t * (x / sum(x)))
+PS = transform_sample_counts(PS, standf)
 
 
-############################## FAMILY(TOP 5) #############################
-phy <- transform_sample_counts(PS, function(x) x/sum(x)) # get abundance in %
-glom <- tax_glom(phy, taxrank = 'Family') # agglomerate taxa
-dat <- psmelt(glom) # create dataframe from phyloseq object
-dat$Family <- as.character(dat$Family) # convert Phylum to a character vector from a factor because R
-medians <- ddply(dat, ~Family, function(x) c(median=median(x$Abundance))) # group dataframe by Phylum, calculate median rel. abundance
-remainder <- medians[medians$median <= 0.01,]$Family # find Phyla whose rel. abund. is less than 1%
-dat[dat$Family %in% remainder,]$Family <- 'Remainder' # change their name to "Remainder"
+PS_alt <- merge_samples(PS, "alt")
 
-p= ggplot(dat,
-          aes(x=reorder(Family, Abundance),
-              y=Abundance)) + geom_boxplot() + coord_flip() + ggtitle ("The most abundant bacterial family")
+total = median(sample_sums(PS_alt))
+standf = function(x, t=total) round(t * (x / sum(x)))
+PS_alt = transform_sample_counts(PS_alt, standf)
 
-p
-get_taxa_unique(PS, "Family")
-############################## GENUS(TOP 5) #############################
-PS=PS2
-phy <- transform_sample_counts(PS, function(x) x/sum(x)) # get abundance in %
-glom <- tax_glom(phy, taxrank = 'Genus') # agglomerate taxa
-dat <- psmelt(glom) # create dataframe from phyloseq object
-dat$Genus <- as.character(dat$Genus) # convert Genus to a character vector from a factor because R
-medians <- ddply(dat, ~Genus, function(x) c(median=median(x$Abundance))) # group dataframe by Genus, calculate median rel. abundance
-remainder <- medians[medians$median <= 0.01,]$Genus # find Genus whose rel. abund. is less than 1%
-dat[dat$Genus %in% remainder,]$Genus <- 'Remainder' # change their name to "Remainder"
+p1=plot_bar(PS_alt, fill = "Order") + geom_bar(stat="identity", position="stack") +scale_fill_manual(values=c25)
 
-p=ggplot(dat,
-         aes(x=reorder(Genus, Abundance),
-             y=Abundance)) + geom_boxplot() + coord_flip() + ggtitle ("The most abundant family genera")
+p1=p1+ theme_classic()+ theme(text = element_text(size = 18), axis.text.x = element_text(angle = 90, hjust = 1))
 
-p
+# Change order of X axis by altitude group
+library(forcats)
+p1=p1 + aes(x = fct_reorder(Sample, p1$data$alt2))
 
-get_taxa_unique(PS, "Genus")
 
+
+PS_pop <- merge_samples(PS, "pop")
+total = median(sample_sums(PS_pop))
+standf = function(x, t=total) round(t * (x / sum(x)))
+PS_pop = transform_sample_counts(PS_pop, standf)
+
+p2=plot_bar(PS_pop, fill = "Order") + geom_bar(stat="identity", position="stack") +scale_fill_manual(values=c25)
+
+p2=p2+ theme_classic()+ theme(text = element_text(size = 18), axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Change order of X axis by altitude group
+library(forcats)
+p2=p2 + aes(x = fct_reorder(Sample, p2$data$alt2))
+
+#combine plots
+library(ggpubr)
+ggarrange(p1, p2, ncol=2, nrow=1, common.legend = TRUE, legend="right")
 
 
 
@@ -389,17 +349,34 @@ write.csv(a_div,"D:/Rwd/PhD18S/tables/alpha_table.csv",row.names = F,quote = F)
                     
 #alpha diversity plots
 ##ALSO CHECK THIS OUT https://rpubs.com/lconteville/713954
-p=plot_richness(PS, x="alt", measures=c("Observed", "Simpson", "Shannon"))+geom_boxplot(alpha=0.6)+ theme_classic()
-library(forcats)
+p=plot_richness(PS, x="alt", measures=c("Observed", "Simpson", "Shannon"), color="alt")+geom_boxplot(alpha=0.6)
 p=p+aes(x = fct_reorder(alt, p$data$alt2))
-comp=list(c("low","middle"),c("middle","high"),c("low","high"))
-symnum.args=list(cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 1), symbols = c("****", "***", "**", "*", "ns"))
 
-p+stat_compare_means(method = "wilcox.test", comparisons = comp, label = "p.signif", symnum.args = symnum.args)
 
+p=plot_richness(PS, x="alt", measures=c("Observed", "Simpson", "Shannon"))+geom_boxplot(alpha=0.6)+ theme_classic()
+
+#order x axis by altitude
+p=p+aes(x = fct_reorder(alt, p$data$alt2))
+p=p+ theme_classic()+ theme(text = element_text(size = 18), axis.text.x = element_text(angle = 90, hjust = 1))
 
 #### mixed modelling ALPHA
-PHYLOSEQ2.rare<-rarefy_even_depth(PS)
+#PHYLOSEQ2.rare<-rarefy_even_depth(PS) #use rrarefy instead
+
+# Step 1: Extract OTU/ASV table from phyloseq object
+otu_table <- as(otu_table(PS), "matrix")
+
+# Step 2: Apply rrarefy function
+# Define the desired sample size (minimum sequencing depth)
+min_depth <- min(rowSums(otu_table)) # You can set this value manually if desired
+
+# Perform repeated subsampling
+rarefied_otu_table <- rrarefy(otu_table, min_depth)
+
+OTU=otu_table(rarefied_otu_table, taxa_are_rows=F)
+
+otu_table(PS)=OTU
+
+PHYLOSEQ2.rare=PS
 
 RICH<-estimate_richness(PHYLOSEQ2.rare, measures=c("Shannon", "Simpson"))
 RICH<-data.frame(RICH,sample_data(PHYLOSEQ2.rare))
@@ -423,23 +400,19 @@ PS=PS_diet
 rm(PS_diet)
 
 
+PS=transform_sample_counts(PS, function(x) sqrt(x))
+
 ##Beta Diversity: Plot the PCoA using Bray-Curtis distance:
 
-bray_dist= phyloseq::distance(PS, method="bray", weighted=F)
-ordination = ordinate(PS, method="PCoA", distance="bray")
-p=plot_ordination(PS, ordination, color="alt") + theme(aspect.ratio=1)+ ggtitle("PCoA using the Bray-Curtis distance (PERMANOVA p=0.001)") + geom_point(size=2)
-
-plot_ordination(PS, ordination, color="alt", shape = "pop") + 
-  theme(aspect.ratio=1, legend.text = element_text(size = 12)) +
-  geom_point(size=3)+scale_shape_manual(values=c(0,15,4,21,17,3))
-
-#0,4,21,3,15,17
+bray_dist= phyloseq::distance(PHYLOSEQ2.rare, method="bray", weighted=F)
+ordination = ordinate(PHYLOSEQ2.rare, method="PCoA", distance="bray")
+p=plot_ordination(PHYLOSEQ2.rare, ordination , color="alt", shape ="pop") + theme(aspect.ratio=1)+ geom_point(size=5)+ theme(text = element_text(size = 20),legend.text=element_text(size=20))+theme_classic()
 
 ## PERMANOVA ##
-adonis2(bray_dist ~ sample_data(PS)$alt)     ##significant
+adonis2(bray_dist ~ sample_data(PHYLOSEQ2.rare)$alt)     ##significant
 
 ### MIXED MODELLING ###
-PHYLOSEQ2.rare<-rarefy_even_depth(PS)
+#PHYLOSEQ2.rare<-rarefy_even_depth(PS) use rrarefy instead
 PHYLOSEQ2.trans<-transform_sample_counts(PHYLOSEQ2.rare,function(x) x/sum(x))
 DIST<-vegdist(otu_table(PHYLOSEQ2.trans))
 ORD<-ordinate(PHYLOSEQ2.trans,method="PCoA",distance = DIST)
@@ -473,14 +446,14 @@ summary(mdmr.res) #significant 0.0001
 
 
 
-######Prepare matrix for comparison microsatellite and microbiome##############
+######Prepare matrix for comparison diet and microbiome##############
 ###############################################################################
 #read datasets
 #Microbiome
 rm(list = ls())
 '%!in%' <- function(x,y)!('%in%'(x,y))
-load("D:/Rwd/phyloseq_fin/PS.R") #load phyloseq data
-PS= subset_samples(PS, altitude %!in% "out"==T) #exclude out samples
+load("D:/Rwd/phyloseq_fin/PS2_cor.R") #load phyloseq data
+PS2_cor= subset_samples(PS2_cor, altitude %!in% "out"==T) #exclude out samples
 
 #diet
 load("D:/Rwd/phyloseq_fin/diet/PS_diet_fin.R")
@@ -490,44 +463,63 @@ rm(PS_diet)
 
 ##Check sample IDs and get same samples for each dataset
 DT=sort(sample_names(PS))
-MB=sort(sample_names(PS))
+MB=sort(sample_names(PS2_cor))
 
 PS= subset_samples(PS, sample_names(PS) %!in% c("DB-1", "A03_Newkit","A10_Newkit","ER-3_Newkit_fr","KZ-1_Newkit_fr","KZ-5_Newkit_fr")==T)
 sample_names(PS)[19]="K03"
 sample_names(PS)[20]="K06"
 
 
-PS= subset_samples(PS, sample_ID %!in% c("DB-3","DB-5","DB-6","DB-7","E9-2",
+PS2_cor= subset_samples(PS2_cor, sample_ID %!in% c("DB-3","DB-5","DB-6","DB-7","E9-2",
                                                    "K01","K02","K04","K05","K08","K09","K10","K11",
                                                    "KZ-2","U02","U04","U05","U07","U08")==T)
 DT=sort(sample_names(PS))
-MB=sort(sample_names(PS))
+MB=sort(sample_names(PS2_cor))
 
 DT%in%MB  ##ALL OK
 
-######################################microbiome matrix
-MBIO_PC= ordinate(PS, method="PCoA", distance="bray")
+
+distm=as.matrix(vegan::vegdist(otu_table(PS2_cor))) #microbiome
+distd=as.matrix(vegan::vegdist(otu_table(PS))) #diet
 
 
-#calculate eucledian distances from the coordinates, distance matrix
-library(sf)
-library(geosphere)
-
-x <- data.frame(MBIO_PC$vectors[,1])
-y <- data.frame(MBIO_PC$vectors[,2])
-df <- data.frame(longitude = x, latitute= y)
-MBIO_MAT <- distm(df, fun= distGeo)
-
-######################################diet matrix
-DIET_PC= ordinate(PS, method="PCoA", distance="bray")
-
-x <- data.frame(DIET_PC$vectors[,1])
-y <- data.frame(DIET_PC$vectors[,2])
-df <- data.frame(longitude = x, latitute= y)
-DIET_MAT <- distm(df, fun= distGeo)
 
 #Mantel Test for Similarity of Two Matrices
 library(ape)
 
-mantel.test(MBIO_MAT, DIET_MAT, nperm = 999, alternative="two.sided") #p=0.30
+mantel.test(distm, distd, nperm = 999, alternative="two.sided") #p=0.20
+
+
+
+
+#########################differencial abundance ########################################################
+library(phylosmith)
+
+rm(list = ls())
+load("D:/Rwd/phyloseq_fin/diet/PS_diet_fin.R")
+PS=PS_diet
+rm(PS_diet)
+
+
+PS_ord <- conglomerate_taxa(PS, "Order")
+
+
+total = median(sample_sums(PS_ord))
+standf = function(x, t=total) round(t * (x / sum(x)))
+PS_ord = transform_sample_counts(PS_ord, standf)
+
+res <- DA.aov(data = PS_ord, predictor = "alt", relative = TRUE, p.adj = "fdr")
+write.table(res, file="D:/Rwd/PhD18s/tables/comp.csv")
+
+res <- DA.aov(data = PS_ord, predictor = "pop", relative = TRUE, p.adj = "fdr")
+write.table(res, file="D:/Rwd/PhD18s/tables/comp2.csv")
+
+PS_low=subset_samples(PS_ord, alt %in% "low"==T)
+PS_high=subset_samples(PS_ord, alt %in% "high"==T)
+PS_mid=subset_samples(PS_ord, alt %in% "middle"==T)
+
+sort(rowSums(otu_table(PS_low)))  # Asparag 3413, UnB 0,   UnM 102788
+sort(rowSums(otu_table(PS_mid)))  # EU 1259, UnB 91,  UnM 107020
+sort(rowSums(otu_table(PS_high))) # EU 674,  UnB 578, UnM 170150
+
 
