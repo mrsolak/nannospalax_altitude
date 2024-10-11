@@ -360,23 +360,8 @@ p=p+aes(x = fct_reorder(alt, p$data$alt2))
 p=p+ theme_classic()+ theme(text = element_text(size = 18), axis.text.x = element_text(angle = 90, hjust = 1))
 
 #### mixed modelling ALPHA
-#PHYLOSEQ2.rare<-rarefy_even_depth(PS) #use rrarefy instead
+PHYLOSEQ2.rare<-phyloseq_mult_raref_avg(PS) 
 
-# Step 1: Extract OTU/ASV table from phyloseq object
-otu_table <- as(otu_table(PS), "matrix")
-
-# Step 2: Apply rrarefy function
-# Define the desired sample size (minimum sequencing depth)
-min_depth <- min(rowSums(otu_table)) # You can set this value manually if desired
-
-# Perform repeated subsampling
-rarefied_otu_table <- rrarefy(otu_table, min_depth)
-
-OTU=otu_table(rarefied_otu_table, taxa_are_rows=F)
-
-otu_table(PS)=OTU
-
-PHYLOSEQ2.rare=PS
 
 RICH<-estimate_richness(PHYLOSEQ2.rare, measures=c("Shannon", "Simpson"))
 RICH<-data.frame(RICH,sample_data(PHYLOSEQ2.rare))
@@ -412,7 +397,7 @@ p=plot_ordination(PHYLOSEQ2.rare, ordination , color="alt", shape ="pop") + them
 adonis2(bray_dist ~ sample_data(PHYLOSEQ2.rare)$alt)     ##significant
 
 ### MIXED MODELLING ###
-#PHYLOSEQ2.rare<-rarefy_even_depth(PS) use rrarefy instead
+#PHYLOSEQ2.rare<-rarefy_even_depth(PS) use phyloseq_mult_raref_avg instead
 PHYLOSEQ2.trans<-transform_sample_counts(PHYLOSEQ2.rare,function(x) x/sum(x))
 DIST<-vegdist(otu_table(PHYLOSEQ2.trans))
 ORD<-ordinate(PHYLOSEQ2.trans,method="PCoA",distance = DIST)
@@ -521,5 +506,23 @@ PS_mid=subset_samples(PS_ord, alt %in% "middle"==T)
 sort(rowSums(otu_table(PS_low)))  # Asparag 3413, UnB 0,   UnM 102788
 sort(rowSums(otu_table(PS_mid)))  # EU 1259, UnB 91,  UnM 107020
 sort(rowSums(otu_table(PS_high))) # EU 674,  UnB 578, UnM 170150
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
